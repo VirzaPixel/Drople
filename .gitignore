@@ -1,1 +1,11 @@
 /understanding
+
+# Rust
+/core/target/
+**/*.rs.bk
+
+# Env
+.env
+
+.codebase-memory
+/docs

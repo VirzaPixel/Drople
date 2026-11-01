@@ -1,0 +1,30 @@
+[package]
+name = "drople_core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "drople_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+argon2 = "0.5.3"
+async-channel = "2.5.0"
+async-trait = "0.1.89"
+base64 = "0.23.1"
+chacha20poly1305 = "0.10.1"
+futures = "0.3.34"
+libp2p = { version = "0.57.1", features = ["tokio", "tcp", "quic", "noise", "yamux", "mdns", "identify", "ping", "dcutr", "relay", "request-response", "json", "macros"] }
+once_cell = "1.20.3"
+rand = "0.8.5"
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10.8"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "fs"] }
+uuid = { version = "1.28.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"
