@@ -96,17 +96,6 @@ flutter run -d linux # atau android / windows / macos
 
 ---
 
-## Status Pengembangan (Fase 1–7)
-
-- [x] **FASE 1:** Inisialisasi arsitektur, SQLite schema dasar, FFI awal, dan UI Catatan.
-- [x] **FASE 2:** P2P Identity Ed25519, mDNS discovery, Swarm, dan Relay Client.
-- [x] **FASE 3:** CRDT delta synchronization protocol dan status tracking per-catatan.
-- [x] **FASE 4:** Chunking file 64 KiB, wire messaging libp2p, dan manajemen riwayat transfer file.
-- [x] **FASE 5:** Pairing code autentik (`DRO1:`), visual fingerprint SHA-256, dan modul kriptografi XChaCha20-Poly1305.
-- [x] **FASE 6:** Zero-knowledge Google Drive backup (`DRPL1`), 12 kata mnemonic recovery key, dan CRDT restore.
-- [x] **FASE 7:** Integrasi final, UI polish (Files & Backup screen), bebas warning/error, dan sinkronisasi dokumentasi rilis.
-
----
 
 ## Lisensi
 Proyek privat / mandiri oleh Virza.
