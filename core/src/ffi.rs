@@ -469,6 +469,43 @@ pub extern "C" fn drople_backup_is_configured(out_configured: *mut c_int) -> c_i
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn drople_gdrive_client_id(out_client_id: *mut *mut c_char) -> c_int {
+    run(|| {
+        let client_id = backup::gdrive::configured_client_id()?;
+        write_out(out_client_id, client_id)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_gdrive_has_client_secret(out_configured: *mut c_int) -> c_int {
+    run(|| {
+        let configured = backup::gdrive::has_client_secret()?;
+        write_bool(out_configured, configured)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_gdrive_exchange_code(
+    code: *const c_char,
+    verifier: *const c_char,
+    redirect_uri: *const c_char,
+) -> c_int {
+    let code = match cstr_to_string(code) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    let verifier = match cstr_to_string(verifier) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    let redirect_uri = match cstr_to_string(redirect_uri) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| backup::gdrive::exchange_code(&code, &verifier, &redirect_uri))
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn drople_gdrive_set_client(
     client_id: *const c_char,
     client_secret: *const c_char,
@@ -484,7 +521,10 @@ pub extern "C" fn drople_gdrive_set_client(
     run(|| {
         with_conn(|conn| {
             db::set_setting(conn, backup::gdrive::KEY_CLIENT_ID, &client_id)?;
-            db::set_setting(conn, backup::gdrive::KEY_CLIENT_SECRET, &client_secret)
+            if !client_secret.trim().is_empty() {
+                db::set_setting(conn, backup::gdrive::KEY_CLIENT_SECRET, &client_secret)?;
+            }
+            Ok(())
         })
     })
 }

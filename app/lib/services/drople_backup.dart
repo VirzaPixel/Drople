@@ -30,10 +30,25 @@ class DropleBackup {
     _bindings.gdriveSetToken(accessToken, refreshToken, expiresAt);
   }
 
+  /// Client ID OAuth yang tersimpan atau dari environment build.
+  String clientId() => _bindings.gdriveClientId();
+
+  /// Apakah client secret OAuth sudah dikonfigurasi di core.
+  bool hasClientSecret() => _bindings.gdriveHasClientSecret();
+
+  /// Menukar authorization code hasil login browser menjadi token tersimpan.
+  void completeOAuth({
+    required String code,
+    required String verifier,
+    required String redirectUri,
+  }) {
+    _bindings.gdriveExchangeCode(code, verifier, redirectUri);
+  }
+
   /// Set client id dan secret kustom (opsional).
   void setGoogleClient({
     required String clientId,
-    required String clientSecret,
+    String clientSecret = '',
   }) {
     _bindings.gdriveSetClient(clientId, clientSecret);
   }

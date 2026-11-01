@@ -528,6 +528,33 @@ class DropleBindings {
     }
   }
 
+  String gdriveClientId() => _stringOut('drople_gdrive_client_id');
+
+  bool gdriveHasClientSecret() =>
+      _boolOut('drople_gdrive_has_client_secret');
+
+  void gdriveExchangeCode(
+    String code,
+    String verifier,
+    String redirectUri,
+  ) {
+    final c = code.toNativeUtf8();
+    final v = verifier.toNativeUtf8();
+    final r = redirectUri.toNativeUtf8();
+    try {
+      final rc = _lib
+          .lookupFunction<_UpdateNative, _UpdateDart>(
+              'drople_gdrive_exchange_code')(c, v, r);
+      if (rc != 0) {
+        throw StateError('drople_gdrive_exchange_code gagal (kode $rc)');
+      }
+    } finally {
+      malloc.free(c);
+      malloc.free(v);
+      malloc.free(r);
+    }
+  }
+
   bool gdriveIsConnected() => _boolOut('drople_gdrive_is_connected');
 
   String gdriveBackup() => _stringOut('drople_gdrive_backup');

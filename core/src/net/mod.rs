@@ -156,14 +156,10 @@ pub fn add_relay(addr: &str) -> Result<()> {
 }
 
 /// Meminta sinkronisasi catatan dengan peer tertentu.
-pub fn sync_with_peer(peer_id: &str) -> Result<()> {
-    if peer_id.trim().is_empty() {
-        return Err(DropleError::InvalidInput("peer id kosong".into()));
-    }
-    handle_with(|handle| {
-        handle.request_sync(peer_id);
-        Ok(())
-    })
+pub fn sync_with_peer(_peer_id: &str) -> Result<()> {
+    Err(DropleError::InvalidInput(
+        "sinkronisasi catatan antar perangkat dinonaktifkan".into(),
+    ))
 }
 
 /// Menjadwalkan pengiriman file ke peer melalui node P2P.

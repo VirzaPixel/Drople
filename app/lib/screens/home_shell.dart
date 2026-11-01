@@ -3,11 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../l10n/l10n.dart';
 import '../services/drople_core.dart';
 import '../services/drople_file.dart';
 import '../services/drople_network.dart';
-import '../services/drople_sync.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_chrome.dart';
 import '../widgets/ui.dart';
 import 'backup_screen.dart';
 import 'files_screen.dart';
@@ -24,19 +25,22 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   final DropleCore _core = DropleCore();
   final DropleNetwork _network = DropleNetwork.shared;
-  final DropleSync _sync = DropleSync();
   final DropleFile _files = DropleFile();
 
   int _index = 0;
   bool _ready = false;
   String? _error;
-  String? _networkWarning;
+  bool _networkWarning = false;
 
   static const _destinations = [
-    _Destination('Catatan', Icons.edit_note_rounded, Icons.edit_note_outlined),
-    _Destination('Perangkat', Icons.devices_rounded, Icons.devices_outlined),
-    _Destination('File', Icons.folder_rounded, Icons.folder_outlined),
-    _Destination('Backup', Icons.cloud_rounded, Icons.cloud_outlined),
+    _Destination('nav.devices', Icons.radar_outlined, Icons.radar_rounded),
+    _Destination('nav.files', Icons.folder_outlined, Icons.folder_rounded),
+    _Destination(
+      'nav.notes',
+      Icons.edit_note_outlined,
+      Icons.edit_note_rounded,
+    ),
+    _Destination('nav.backup', Icons.cloud_outlined, Icons.cloud_rounded),
   ];
 
   @override
@@ -51,7 +55,9 @@ class _HomeShellState extends State<HomeShell> {
 
       try {
         final docs = await getApplicationDocumentsDirectory();
-        final receive = Directory('${docs.path}${Platform.pathSeparator}Drople');
+        final receive = Directory(
+          '${docs.path}${Platform.pathSeparator}Drople',
+        );
         if (!await receive.exists()) {
           await receive.create(recursive: true);
         }
@@ -61,7 +67,7 @@ class _HomeShellState extends State<HomeShell> {
       try {
         await _network.start();
       } catch (e) {
-        _networkWarning = 'Jaringan P2P belum aktif. Catatan tetap bisa dipakai offline.';
+        _networkWarning = true;
       }
 
       if (!mounted) return;
@@ -75,16 +81,46 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  Future<void> _selectDestination(int index) async {
+    if (index == 3) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          final theme = Theme.of(context);
+          final l = context.l10n;
+          return AlertDialog(
+            icon: Icon(
+              Icons.cloud_sync_rounded,
+              color: theme.colorScheme.primary,
+            ),
+            title: Text(l.t('home.backupTitle')),
+            content: Text(l.t('home.backupMessage')),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(l.t('home.gotIt')),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+    setState(() => _index = index);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_ready) {
       return const Scaffold(body: _Splash());
     }
     if (_error != null) {
+      final l = context.l10n;
       return Scaffold(
+        appBar: const AppHeader(),
         body: EmptyState(
           icon: Icons.error_outline_rounded,
-          title: 'Core gagal dimuat',
+          title: l.t('home.coreError'),
           message: _error!,
           action: FilledButton.icon(
             onPressed: () {
@@ -95,75 +131,67 @@ class _HomeShellState extends State<HomeShell> {
               _bootstrap();
             },
             icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Coba Lagi'),
+            label: Text(l.t('home.retry')),
           ),
         ),
       );
     }
 
     final pages = [
-      NotesScreen(core: _core),
-      PeersScreen(network: _network, sync: _sync, files: _files),
+      PeersScreen(network: _network, files: _files),
       FilesScreen(files: _files, network: _network),
+      NotesScreen(core: _core),
       BackupScreen(),
     ];
 
+    final l = context.l10n;
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 900;
         final body = Column(
           children: [
-            if (_networkWarning != null) _warningBanner(context),
+            if (_networkWarning) _warningBanner(context),
             Expanded(
-              child: IndexedStack(
-                index: _index,
-                children: pages,
-              ),
+              child: IndexedStack(index: _index, children: pages),
             ),
           ],
         );
 
         if (!wide) {
           return Scaffold(
+            appBar: const AppHeader(),
             body: body,
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
-              destinations: _destinations
-                  .map(
-                    (d) => NavigationDestination(
-                      icon: Icon(d.icon),
-                      selectedIcon: Icon(d.selectedIcon),
-                      label: d.label,
-                    ),
-                  )
-                  .toList(),
+            bottomNavigationBar: AppBottomNav(
+              items: [
+                for (final d in _destinations.take(3))
+                  NavItemData(
+                    d.icon,
+                    l.t(d.label),
+                    selectedIcon: d.selectedIcon,
+                  ),
+              ],
+              currentIndex: _index <= 2 ? _index : 0,
+              onTap: _selectDestination,
             ),
           );
         }
 
         return Scaffold(
+          appBar: const AppHeader(),
           body: Row(
             children: [
-              NavigationRail(
-                selectedIndex: _index,
-                onDestinationSelected: (i) => setState(() => _index = i),
-                labelType: NavigationRailLabelType.all,
-                leading: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: BrandMark(size: 42),
-                ),
-                destinations: _destinations
-                    .map(
-                      (d) => NavigationRailDestination(
-                        icon: Icon(d.icon),
-                        selectedIcon: Icon(d.selectedIcon),
-                        label: Text(d.label),
-                      ),
-                    )
-                    .toList(),
+              AppSideNav(
+                items: [
+                  for (final d in _destinations)
+                    NavItemData(
+                      d.icon,
+                      l.t(d.label),
+                      selectedIcon: d.selectedIcon,
+                    ),
+                ],
+                currentIndex: _index,
+                onTap: _selectDestination,
               ),
-              VerticalDivider(width: 1, thickness: 1, color: Theme.of(context).colorScheme.outlineVariant),
               Expanded(child: body),
             ],
           ),
@@ -180,17 +208,21 @@ class _HomeShellState extends State<HomeShell> {
         padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
         child: Row(
           children: [
-            const Icon(Icons.wifi_off_rounded, size: 18, color: AppColors.amber),
+            const Icon(
+              Icons.wifi_off_rounded,
+              size: 18,
+              color: AppColors.amber,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                _networkWarning!,
+                context.l10n.t('home.networkWarning'),
                 style: theme.textTheme.labelSmall?.copyWith(fontSize: 11.5),
               ),
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
-              onPressed: () => setState(() => _networkWarning = null),
+              onPressed: () => setState(() => _networkWarning = false),
               icon: const Icon(Icons.close_rounded, size: 16),
             ),
           ],
@@ -215,7 +247,7 @@ class _Splash extends StatelessWidget {
           Text('Drople', style: theme.textTheme.headlineLarge),
           const SizedBox(height: 6),
           Text(
-            'Menyiapkan ruang kerjamu',
+            context.l10n.t('home.preparing'),
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 26),

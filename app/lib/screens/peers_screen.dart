@@ -1,29 +1,24 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../l10n/l10n.dart';
 import '../models/peer.dart';
 import '../services/drople_file.dart';
 import '../services/drople_network.dart';
-import '../services/drople_sync.dart';
 import '../theme/app_theme.dart';
+import '../widgets/qr_scanner_screen.dart';
 import '../widgets/ui.dart';
 
 class PeersScreen extends StatefulWidget {
-  const PeersScreen({
-    super.key,
-    required this.network,
-    required this.sync,
-    required this.files,
-  });
+  const PeersScreen({super.key, required this.network, required this.files});
 
   final DropleNetwork network;
-  final DropleSync sync;
   final DropleFile files;
 
   @override
@@ -36,6 +31,7 @@ class _PeersScreenState extends State<PeersScreen> {
   Timer? _ticker;
   String _lastSignature = '';
   bool _connecting = false;
+  bool _codeOpen = false;
 
   @override
   void initState() {
@@ -48,7 +44,8 @@ class _PeersScreenState extends State<PeersScreen> {
     try {
       final peers = widget.network.listPeers();
       final code = widget.network.localShortCode();
-      final signature = '$code|${peers.map((p) => '${p.id}:${p.connected}:${p.name}:${p.code}:${p.lastSeen}').join(',')}';
+      final signature =
+          '$code|${peers.map((p) => '${p.id}:${p.connected}:${p.name}:${p.code}:${p.lastSeen}').join(',')}';
       if (silent && signature == _lastSignature) return;
       _lastSignature = signature;
       if (!mounted) return;
@@ -67,9 +64,9 @@ class _PeersScreenState extends State<PeersScreen> {
   Future<void> _copyCode() async {
     await Clipboard.setData(ClipboardData(text: _code));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Kode pairing disalin')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(context.l10n.t('peers.codeCopied'))));
   }
 
   void _showQr() {
@@ -84,10 +81,13 @@ class _PeersScreenState extends State<PeersScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Pindai untuk terhubung', style: theme.textTheme.titleLarge),
+                Text(
+                  ctx.l10n.t('peers.qrTitle'),
+                  style: theme.textTheme.titleLarge,
+                ),
                 const SizedBox(height: 6),
                 Text(
-                  'Buka Drople di perangkat lain, lalu pilih Pindai QR.',
+                  ctx.l10n.t('peers.qrHint'),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall,
                 ),
@@ -104,11 +104,11 @@ class _PeersScreenState extends State<PeersScreen> {
                     backgroundColor: Colors.white,
                     eyeStyle: const QrEyeStyle(
                       eyeShape: QrEyeShape.square,
-                      color: AppColors.ink,
+                      color: AppColors.surfaceContainerLowest,
                     ),
                     dataModuleStyle: const QrDataModuleStyle(
                       dataModuleShape: QrDataModuleShape.square,
-                      color: AppColors.ink,
+                      color: AppColors.surfaceContainerLowest,
                     ),
                   ),
                 ),
@@ -129,7 +129,7 @@ class _PeersScreenState extends State<PeersScreen> {
                       _copyCode();
                     },
                     icon: const Icon(Icons.copy_rounded, size: 18),
-                    label: const Text('Salin Kode'),
+                    label: Text(ctx.l10n.t('peers.copyCode')),
                   ),
                 ),
               ],
@@ -145,9 +145,9 @@ class _PeersScreenState extends State<PeersScreen> {
       await _manualCode();
       return;
     }
-    final scanned = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const _ScanScreen()),
-    );
+    final scanned = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const QrScannerScreen()));
     if (scanned != null && scanned.isNotEmpty && mounted) {
       await _connect(scanned);
     }
@@ -166,9 +166,10 @@ class _PeersScreenState extends State<PeersScreen> {
   }
 
   Future<void> _connect(String raw) async {
+    final l = context.l10n;
     final code = _normalize(raw);
     if (code.length < 4) {
-      _toast('Kode pairing tidak valid');
+      _toast(l.t('peers.invalidCode'));
       return;
     }
     setState(() => _connecting = true);
@@ -188,15 +189,15 @@ class _PeersScreenState extends State<PeersScreen> {
           rethrow;
         }
       }
-      _toast('Permintaan pairing dikirim');
+      _toast(l.t('peers.toastSent'));
       _load(silent: false);
     } on StateError catch (e) {
       final message = e.message.contains('kode 16')
-          ? 'Perangkat dengan kode $code belum terdeteksi. Pastikan Drople terbuka di perangkat tujuan dan berada di jaringan yang sama.'
-          : 'Gagal terhubung. Periksa kode lalu coba lagi.';
+          ? l.t('peers.toastNotFound', {'code': code})
+          : l.t('peers.toastConnectFailed');
       _toast(message);
     } catch (_) {
-      _toast('Gagal terhubung ke perangkat');
+      _toast(l.t('peers.toastConnectError'));
     } finally {
       if (mounted) setState(() => _connecting = false);
     }
@@ -207,27 +208,47 @@ class _PeersScreenState extends State<PeersScreen> {
     final code = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Masukkan Kode'),
+        title: Text(ctx.l10n.t('peers.dialogTitle')),
         content: TextField(
           controller: controller,
           autofocus: true,
-          maxLength: 12,
+          maxLength: 6,
           textCapitalization: TextCapitalization.characters,
+          autocorrect: false,
+          enableSuggestions: false,
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+            TextInputFormatter.withFunction((oldValue, newValue) {
+              final upper = newValue.text.toUpperCase();
+              return newValue.copyWith(
+                text: upper,
+                selection: newValue.selection,
+                composing: TextRange.empty,
+              );
+            }),
           ],
-          style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(letterSpacing: 5),
+          style: Theme.of(
+            ctx,
+          ).textTheme.headlineSmall?.copyWith(letterSpacing: 4),
           textAlign: TextAlign.center,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'ABC123',
+            hintStyle: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
+              letterSpacing: 4,
+              color: AppColors.onSurfaceVariant,
+            ),
             counterText: '',
+            contentPadding: const EdgeInsets.symmetric(vertical: 14),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(ctx.l10n.t('peers.cancel')),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Hubungkan'),
+            child: Text(ctx.l10n.t('peers.connectAction')),
           ),
         ],
       ),
@@ -242,61 +263,50 @@ class _PeersScreenState extends State<PeersScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _sync(PeerEntry peer) async {
-    try {
-      widget.sync.syncWithPeer(peer.id);
-      _toast('Sinkronisasi dengan ${peer.name} dimulai');
-    } catch (_) {
-      _toast('Gagal memulai sinkronisasi');
-    }
-  }
-
   Future<void> _send(PeerEntry peer) async {
+    final l = context.l10n;
     try {
       final file = await FilePicker.pickFile();
       final path = file?.path;
       if (path == null) return;
       widget.files.sendFile(peer.id, path);
-      _toast('Mengirim ${file!.name} ke ${peer.name}');
+      _toast(l.t('peers.sending', {'file': file!.name, 'peer': peer.name}));
     } catch (_) {
-      _toast('Gagal mengirim file');
+      _toast(l.t('peers.sendFailed'));
     }
   }
 
-  Future<void> _addRelay() async {
-    final controller = TextEditingController();
-    final addr = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Tambah Relay'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: '/ip4/192.168.1.10/tcp/4001',
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Tambah'),
-          ),
-        ],
-      ),
-    );
-    if (addr != null && addr.trim().isNotEmpty) {
-      try {
-        await widget.network.addRelay(addr.trim());
-        _toast('Relay ditambahkan');
-      } catch (_) {
-        _toast('Alamat relay tidak valid');
-      }
+  Future<void> _connectPeer(PeerEntry peer) async {
+    if (peer.code.isNotEmpty) {
+      await _connect(peer.code);
+    } else {
+      await _manualCode();
     }
+  }
+
+  IconData _peerIcon(PeerEntry peer) {
+    final name = peer.name.toLowerCase();
+    if (name.contains('macbook') ||
+        name.contains('thinkpad') ||
+        name.contains('laptop') ||
+        name.contains('pc') ||
+        name.contains('windows')) {
+      return Icons.laptop_rounded;
+    }
+    if (name.contains('iphone') ||
+        name.contains('galaxy') ||
+        name.contains('pixel') ||
+        name.contains('android') ||
+        name.contains('phone')) {
+      return Icons.phone_android_rounded;
+    }
+    return Icons.devices_other_rounded;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l = context.l10n;
     final connected = _peers.where((p) => p.connected).length;
 
     return Scaffold(
@@ -307,69 +317,38 @@ class _PeersScreenState extends State<PeersScreen> {
             child: RefreshIndicator(
               onRefresh: () async => _load(silent: false),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 children: [
-                  Row(
-                    children: [
-                      const BrandMark(size: 44),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Perangkat', style: theme.textTheme.headlineMedium),
-                            Text(
-                              '${widget.network.deviceName ?? 'Perangkat ini'} · $connected terhubung',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Tambah relay',
-                        onPressed: _addRelay,
-                        icon: const Icon(Icons.settings_ethernet_rounded),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  _pairingCard(theme),
-                  const SizedBox(height: 24),
                   SectionHeader(
-                    title: 'Perangkat Terdekat',
+                    title: l.t('nav.devices'),
+                    subtitle: l.t('peers.subtitle', {
+                      'device':
+                          widget.network.deviceName ?? l.t('peers.thisDevice'),
+                      'count': '$connected',
+                    }),
+                  ),
+                  _codeCard(theme),
+                  const SizedBox(height: 10),
+                  _useCodeCard(theme),
+                  const SizedBox(height: 10),
+                  _RadarCard(
+                    peers: _peers,
+                    onRefresh: () => _load(silent: false),
+                  ),
+                  const SizedBox(height: 20),
+                  SectionHeader(
+                    title: l.t('peers.nearby'),
                     subtitle: _peers.isEmpty
-                        ? 'Mencari perangkat di jaringan yang sama…'
-                        : 'Ditemukan otomatis lewat Wi-Fi lokal',
+                        ? l.t('peers.searchingNetwork')
+                        : l.t('peers.foundAuto'),
                   ),
                   if (_peers.isEmpty)
-                    AppCard(
-                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            width: 34,
-                            height: 34,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text('Menunggu perangkat lain', style: theme.textTheme.titleMedium),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Buka Drople di perangkat lain. Kamu juga bisa memindai kode di atas.',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    )
+                    _emptyPeers(theme)
                   else
                     ...List.generate(
                       _peers.length,
                       (i) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: 10),
                         child: StaggeredEntry(
                           index: i,
                           child: _peerCard(theme, _peers[i]),
@@ -385,218 +364,368 @@ class _PeersScreenState extends State<PeersScreen> {
     );
   }
 
-  Widget _pairingCard(ThemeData theme) {
+  Widget _emptyPeers(ThemeData theme) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            theme.colorScheme.primary,
-            Color.lerp(theme.colorScheme.primary, Colors.black, 0.32)!,
-          ],
+        color: AppColors.surfaceContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.surfaceContainerHigh.withValues(alpha: 0.7),
         ),
-        borderRadius: BorderRadius.circular(26),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              const Icon(Icons.qr_code_2_rounded, color: Colors.white70, size: 19),
-              const SizedBox(width: 8),
-              Text(
-                'Kode Pairing Kamu',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              InkWell(
-                onTap: _copyCode,
-                borderRadius: BorderRadius.circular(99),
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: const Icon(Icons.copy_rounded, color: Colors.white, size: 18),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: _codeChars()
-                .map(
-                  (c) => Container(
-                    width: 42,
-                    height: 54,
-                    margin: const EdgeInsets.only(right: 8),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-                    ),
-                    child: Text(
-                      c,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 24,
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Masukkan kode ini di perangkat lain, atau bagikan lewat QR.',
-            style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _showQr,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: theme.colorScheme.primary,
-                  ),
-                  icon: const Icon(Icons.qr_code_rounded, size: 18),
-                  label: const Text('Tampilkan QR'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _connecting ? null : _scan,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
-                  ),
-                  icon: _connecting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.qr_code_scanner_rounded, size: 18),
-                  label: Text(_connecting ? 'Menghubungkan' : 'Pindai'),
-                ),
-              ),
-            ],
-          ),
-          Center(
-            child: TextButton(
-              onPressed: _connecting ? null : _manualCode,
-              style: TextButton.styleFrom(foregroundColor: Colors.white70),
-              child: const Text('Masukkan kode manual'),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(11),
             ),
+            child: const Icon(
+              Icons.devices_other_rounded,
+              size: 20,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  context.l10n.t('peers.emptyTitle'),
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  context.l10n.t('peers.emptyMessage'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => _load(silent: false),
+            child: Text(context.l10n.t('peers.scan')),
           ),
         ],
       ),
     );
   }
 
-  Widget _peerCard(ThemeData theme, PeerEntry peer) {
-    final initial = peer.name.trim().isEmpty ? '?' : peer.name.trim()[0].toUpperCase();
-    final isOnline = peer.connected;
-    return Pressable(
-      child: AppCard(
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: isOnline
-                    ? theme.colorScheme.primary.withValues(alpha: 0.12)
-                    : theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(
-                initial,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: isOnline ? theme.colorScheme.primary : theme.colorScheme.outline,
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _codeCard(ThemeData theme) {
+    final chars = _codeChars();
+    return Material(
+      color: AppColors.surfaceContainer.withValues(alpha: 0.82),
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => setState(() => _codeOpen = !_codeOpen),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.surfaceContainerHigh),
+          ),
+          child: Column(
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          peer.name.trim().isEmpty ? 'Perangkat Tanpa Nama' : peer.name,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(fontSize: 15),
+                  _IconTile(icon: Icons.key_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10n.t('peers.codeTitle'),
+                          style: theme.textTheme.titleMedium,
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (peer.code.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            peer.code,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              letterSpacing: 0.8,
-                              fontSize: 10,
+                        const SizedBox(height: 2),
+                        Text(
+                          _codeOpen
+                              ? context.l10n.t('peers.codeHide')
+                              : context.l10n.t('peers.codeShow'),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _codeOpen ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    child: const Icon(
+                      Icons.expand_more_rounded,
+                      color: AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                alignment: Alignment.topCenter,
+                child: _codeOpen
+                    ? Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 14),
+                        padding: const EdgeInsets.only(top: 14),
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            top: BorderSide(
+                              color: AppColors.surfaceContainerHigh,
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
+                        child: Column(
+                          children: [
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 300),
+                              child: Row(
+                                children: [
+                                  for (var i = 0; i < chars.length; i++) ...[
+                                    if (i > 0) const SizedBox(width: 7),
+                                    Expanded(
+                                      child: Container(
+                                        height: 46,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color:
+                                              AppColors.surfaceContainerHighest,
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          border: Border.all(
+                                            color:
+                                                AppColors.surfaceContainerHigh,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          chars[i],
+                                          style: inter(
+                                            18,
+                                            weight: FontWeight.w700,
+                                            color: AppColors.primary,
+                                            letterSpacing: 1,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _PillButton(
+                                  icon: Icons.content_copy_rounded,
+                                  label: context.l10n.t('peers.copyCode'),
+                                  onTap: _copyCode,
+                                ),
+                                const SizedBox(width: 8),
+                                _PillButton(
+                                  icon: Icons.qr_code_rounded,
+                                  label: context.l10n.t('peers.showQr'),
+                                  onTap: _showQr,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      )
+                    : const SizedBox(width: double.infinity),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _useCodeCard(ThemeData theme) {
+    return Material(
+      color: AppColors.surfaceContainer.withValues(alpha: 0.6),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _connecting ? null : _manualCode,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.surfaceContainerHigh),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.dialpad_rounded,
+                size: 19,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  context.l10n.t('peers.useCode'),
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              IconButton(
+                tooltip: context.l10n.t('peers.scanQr'),
+                onPressed: _connecting ? null : _scan,
+                icon: _connecting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(
+                        Icons.qr_code_scanner_rounded,
+                        size: 20,
+                        color: AppColors.primary,
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _peerCard(ThemeData theme, PeerEntry peer) {
+    final l = context.l10n;
+    final name = peer.name.trim().isEmpty
+        ? l.t('peers.unnamed')
+        : peer.name.trim();
+    final isOnline = peer.connected;
+    final subtitle = isOnline
+        ? '${l.t('peers.connected')}${peer.latencyMs != null ? ' · ${peer.latencyMs} ms' : ''}'
+        : l.t('peers.lastSeen', {
+            'time': formatRelative(peer.lastSeen, english: l.isEnglish),
+          });
+
+    return AppCard(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(
+              _peerIcon(peer),
+              size: 20,
+              color: isOnline ? AppColors.primary : AppColors.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    if (peer.code.isNotEmpty) ...[
+                      const SizedBox(width: 7),
                       Container(
-                        width: 7,
-                        height: 7,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: isOnline ? AppColors.leaf : theme.colorScheme.outline,
-                          shape: BoxShape.circle,
+                          color: AppColors.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(
+                          peer.code,
+                          style: inter(
+                            9,
+                            weight: FontWeight.w600,
+                            color: AppColors.onSurfaceVariant,
+                            letterSpacing: 0.7,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        isOnline
-                            ? 'Terhubung${peer.latencyMs != null ? ' · ${peer.latencyMs} ms' : ''}'
-                            : 'Terakhir ${formatRelative(peer.lastSeen)}',
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: isOnline
+                            ? AppColors.primary
+                            : AppColors.onSurfaceVariant,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall,
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 104,
+            height: 36,
+            child: OutlinedButton(
+              onPressed: () => isOnline ? _send(peer) : _connectPeer(peer),
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.zero,
+                backgroundColor: AppColors.surfaceContainerLowest,
+                side: const BorderSide(color: AppColors.surfaceContainerHigh),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    isOnline ? Icons.send_rounded : Icons.link_rounded,
+                    size: 15,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    isOnline ? l.t('peers.sendFile') : l.t('peers.connect'),
+                    style: inter(
+                      10,
+                      weight: FontWeight.w600,
+                      color: AppColors.onSurface,
+                    ),
                   ),
                 ],
               ),
             ),
-            if (isOnline) ...[
-              IconButton(
-                tooltip: 'Sinkronkan catatan',
-                onPressed: () => _sync(peer),
-                icon: const Icon(Icons.sync_rounded, size: 20),
-              ),
-              IconButton(
-                tooltip: 'Kirim file',
-                onPressed: () => _send(peer),
-                icon: const Icon(Icons.send_rounded, size: 19),
-              ),
-            ],
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -608,80 +737,278 @@ class _PeersScreenState extends State<PeersScreen> {
   }
 }
 
-class _ScanScreen extends StatefulWidget {
-  const _ScanScreen();
+class _IconTile extends StatelessWidget {
+  const _IconTile({required this.icon});
+
+  final IconData icon;
 
   @override
-  State<_ScanScreen> createState() => _ScanScreenState();
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Icon(icon, size: 20, color: AppColors.primary),
+    );
+  }
 }
 
-class _ScanScreenState extends State<_ScanScreen> {
-  final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    formats: const [BarcodeFormat.qrCode],
-  );
-  bool _handled = false;
+class _PillButton extends StatelessWidget {
+  const _PillButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
-  void _onDetect(BarcodeCapture capture) {
-    if (_handled) return;
-    for (final barcode in capture.barcodes) {
-      final value = barcode.rawValue;
-      if (value != null && value.trim().isNotEmpty) {
-        _handled = true;
-        _controller.stop();
-        Navigator.of(context).pop(value);
-        return;
-      }
-    }
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.primary.withValues(alpha: 0.1),
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: AppColors.primary),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: inter(
+                  11,
+                  weight: FontWeight.w600,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RadarCard extends StatefulWidget {
+  const _RadarCard({required this.peers, required this.onRefresh});
+
+  final List<PeerEntry> peers;
+  final VoidCallback onRefresh;
+
+  @override
+  State<_RadarCard> createState() => _RadarCardState();
+}
+
+class _RadarCardState extends State<_RadarCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ping = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 4),
+  )..repeat();
+
+  static const _spots = [
+    Alignment(-0.72, -0.64),
+    Alignment(-0.62, 0.68),
+    Alignment(0.68, 0.58),
+  ];
+
+  @override
+  void dispose() {
+    _ping.dispose();
+    super.dispose();
+  }
+
+  Widget _ring(Color color) => DecoratedBox(
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      border: Border.all(color: color),
+    ),
+  );
+
+  Widget _node(PeerEntry peer) {
+    final l = context.l10n;
+    final icon =
+        peer.name.toLowerCase().contains('macbook') ||
+            peer.name.toLowerCase().contains('book')
+        ? Icons.laptop_mac_rounded
+        : Icons.phone_android_rounded;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+          ),
+          child: Icon(icon, size: 18, color: AppColors.primary),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 82,
+          child: Text(
+            peer.name.trim().isEmpty ? l.t('peers.radarDevice') : peer.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: inter(
+              9,
+              weight: FontWeight.w500,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Pindai QR Drople'),
+    final theme = Theme.of(context);
+    final l = context.l10n;
+    final nodes = widget.peers.take(3).toList();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainer.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.surfaceContainerHigh),
       ),
-      body: Stack(
-        fit: StackFit.expand,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
-            errorBuilder: (context, error) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.no_photography_rounded,
-                        color: Colors.white54, size: 48),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Kamera tidak dapat digunakan',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Gunakan kode manual dari layar sebelumnya.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
-                    ),
-                  ],
+          Row(
+            children: [
+              Text(l.t('peers.detect'), style: theme.textTheme.titleMedium),
+              const SizedBox(width: 7),
+              const Icon(
+                Icons.wifi_rounded,
+                size: 16,
+                color: AppColors.primary,
+              ),
+              const Spacer(),
+              Text(
+                l.t('peers.online', {
+                  'count': '${widget.peers.where((p) => p.connected).length}',
+                }),
+                style: theme.textTheme.labelSmall,
+              ),
+              IconButton(
+                tooltip: l.t('peers.rescan'),
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                padding: EdgeInsets.zero,
+                onPressed: widget.onRefresh,
+                icon: const Icon(
+                  Icons.refresh_rounded,
+                  size: 17,
+                  color: AppColors.onSurfaceVariant,
                 ),
               ),
-            ),
+            ],
           ),
-          IgnorePointer(
-            child: Center(
-              child: Container(
-                width: 240,
-                height: 240,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white, width: 2.5),
-                  borderRadius: BorderRadius.circular(24),
+          const SizedBox(height: 8),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 278),
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.hardEdge,
+                  children: [
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: AnimatedBuilder(
+                          animation: _ping,
+                          builder: (context, _) {
+                            final p = math.min(_ping.value / 0.75, 1.0);
+                            final e = const Cubic(0, 0, 0.2, 1).transform(p);
+                            return Transform.scale(
+                              scale: 1 + e,
+                              child: _ring(
+                                AppColors.primary.withValues(
+                                  alpha: 0.32 * (1 - e),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: _ring(
+                          AppColors.surfaceContainerHighest.withValues(
+                            alpha: 0.6,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.all(64),
+                        child: _ring(
+                          AppColors.surfaceContainerHighest.withValues(
+                            alpha: 0.8,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.all(96),
+                        child: _ring(AppColors.surfaceContainerHighest),
+                      ),
+                    ),
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.primary.withValues(alpha: 0.2),
+                        border: Border.all(color: AppColors.primary, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.35),
+                            blurRadius: 20,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.smartphone_rounded,
+                        size: 22,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    for (var i = 0; i < nodes.length; i++)
+                      Align(
+                        alignment: _spots[i % _spots.length],
+                        child: _node(nodes[i]),
+                      ),
+                    if (nodes.isEmpty)
+                      Positioned(
+                        bottom: 10,
+                        child: Text(
+                          l.t('peers.searchingNearby'),
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -689,11 +1016,5 @@ class _ScanScreenState extends State<_ScanScreen> {
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 }

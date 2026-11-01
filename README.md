@@ -1,6 +1,6 @@
 # Drople — Offline-First Activity & P2P Manager
 
-Drople adalah aplikasi pengelola aktivitas dan catatan multi-platform (Android, Linux, Windows, macOS) berbasis **offline-first**. Aplikasi ini memungkinkan sinkronisasi catatan dan transfer file antar-perangkat secara langsung (**Peer-to-Peer**) tanpa ketergantungan pada server cloud terpusat, dengan opsi backup terenkripsi end-to-end (E2EE) ke Google Drive milik pengguna.
+Drople adalah aplikasi pengelola catatan dan transfer file multi-platform (Android, Linux, Windows, macOS) berbasis **offline-first**. Catatan bersifat lokal dan independen di setiap perangkat, sedangkan transfer file dilakukan langsung antar-perangkat (**Peer-to-Peer**) tanpa server cloud terpusat. Tersedia opsi backup terenkripsi end-to-end (E2EE) ke Google Drive milik pengguna.
 
 ![P2P Architecture](P2P.jpg)
 
@@ -10,12 +10,14 @@ Drople adalah aplikasi pengelola aktivitas dan catatan multi-platform (Android, 
 
 - **Offline-First & Local Storage:** SQLite lokal dengan migrasi otomatis dan write-ahead logging (WAL).
 - **P2P Discovery & Pairing:** Penemuan lokal otomatis via mDNS + pairing kode/QR (`DRO1:`) dengan verifikasi fingerprint SHA-256.
-- **Sinkronisasi CRDT:** Merge catatan tanpa konflik menggunakan Last-Write-Wins (LWW) delta protocol melalui jaringan libp2p.
+- **Catatan Lokal per Perangkat:** Catatan disimpan mandiri di SQLite setiap perangkat tanpa sinkronisasi catatan antar-peer.
+- **Editor WYSIWYG Ringan:** Format tebal, miring, kode, judul, daftar, checklist, dan kutipan langsung terlihat saat menulis.
 - **Transfer File P2P:** Pengiriman file terpecah dalam potongan 64 KiB dengan validasi hash SHA-256 tiap potongan dan verifikasi akhir.
 - **End-to-End Encryption (E2EE):**
   - Komunikasi P2P dienkripsi via Noise Protocol (libp2p).
   - Snapshot backup dienkripsi di perangkat menggunakan **XChaCha20-Poly1305** dan kunci turunan **Argon2id** dari 12 kata mnemonic recovery key.
 - **Zero-Knowledge Cloud Backup:** Unggah snapshot biner (`DRPL1`) langsung ke `appDataFolder` tersembunyi di akun Google Drive pribadi pengguna. Google tidak dapat membaca isi catatan.
+- **Login Google Drive Langsung:** OAuth 2.0 lewat browser sistem dengan loopback + PKCE; kredensial OAuth client cukup diatur sekali dari aplikasi.
 
 ---
 
@@ -32,14 +34,14 @@ drople/
 │       ├── ffi.rs         # Antarmuka C FFI untuk Flutter
 │       ├── file/          # Chunking & transfer manager
 │       ├── net/           # libp2p node, mDNS, relay, wire protocol
-│       └── sync/          # CRDT LWW merge & delta exchange
+│       └── sync/          # CRDT merge untuk snapshot backup
 ├── app/                   # Flutter App (UI & Platform Integration)
 │   ├── lib/
 │   │   ├── ffi/           # Low-level Dart FFI bindings
 │   │   ├── models/        # Data model (Note, Peer, FileTransfer, Backup)
-│   │   ├── screens/       # Notes, Peers/Sync, Files, Backup/Cloud
+│   │   ├── screens/       # Notes, Perangkat, Files, Backup/Cloud
 │   │   ├── services/      # Service wrapper tingkat tinggi
-│   │   └── widgets/       # Pairing dialog (QR & kode)
+│   │   └── widgets/       # Komponen UI bersama
 │   └── native/            # Binary libdrople_core hasil kompilasi
 ├── docs/
 │   └── FASE/              # Laporan & roadmap fase 1 s.d. 7
@@ -93,9 +95,7 @@ flutter analyze
 cd app
 flutter run -d linux # atau android / windows / macos
 ```
-
 ---
-
 
 ## Lisensi
 Proyek privat / mandiri oleh Virza.

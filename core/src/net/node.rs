@@ -724,12 +724,8 @@ fn handle_wire_response(
     wire: &mut WireState,
 ) {
     match response {
-        WireMessage::Sync { deltas } => {
-            for delta in &deltas {
-                let _ = sync::apply_delta(delta, "remote");
-            }
-            let _ = sync::mark_all_synced();
-        }
+        // Catatan bersifat lokal per perangkat; delta dari peer tidak diterapkan.
+        WireMessage::Sync { .. } => {}
         WireMessage::Ack { ok, message } => {
             let Some(action) = wire.pending.remove(&request_id) else {
                 return;
@@ -759,27 +755,13 @@ fn handle_wire_response(
 fn handle_incoming_request(
     request: WireMessage,
     peer: &PeerId,
-    shared: &Arc<Mutex<SharedState>>,
+    _shared: &Arc<Mutex<SharedState>>,
     db_conn: &Option<Connection>,
     wire: &mut WireState,
 ) -> WireMessage {
     match request {
-        WireMessage::Sync { deltas } => {
-            let local_peer = shared
-                .lock()
-                .map(|s| s.local_peer_id.clone())
-                .unwrap_or_else(|_| "local".to_string());
-            for delta in &deltas {
-                if let Err(e) = sync::apply_delta(delta, &local_peer) {
-                    return WireMessage::nack(e.to_string());
-                }
-            }
-            let reply = match sync::local_deltas() {
-                Ok(deltas) => WireMessage::Sync { deltas },
-                Err(e) => WireMessage::nack(e.to_string()),
-            };
-            let _ = sync::mark_all_synced();
-            reply
+        WireMessage::Sync { .. } => {
+            WireMessage::nack("sinkronisasi catatan antar perangkat dinonaktifkan".to_string())
         }
         WireMessage::FileOffer {
             transfer_id,

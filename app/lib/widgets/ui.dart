@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../theme/app_theme.dart';
 
 class AppCard extends StatelessWidget {
   const AppCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(18),
+    this.padding = const EdgeInsets.all(16),
     this.color,
     this.onTap,
-    this.borderRadius = 22,
+    this.borderRadius = 16,
   });
 
   final Widget child;
@@ -32,9 +33,65 @@ class AppCard extends StatelessWidget {
           padding: padding,
           decoration: BoxDecoration(
             borderRadius: radius,
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+            border: Border.all(
+              color: color == null
+                  ? theme.colorScheme.outlineVariant
+                  : theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+            ),
           ),
           child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class PrimaryButton extends StatelessWidget {
+  const PrimaryButton({
+    super.key,
+    required this.label,
+    this.icon,
+    this.onTap,
+    this.height = 44,
+  });
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback? onTap;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.22),
+              blurRadius: 18,
+            ),
+          ],
+        ),
+        child: FilledButton(
+          onPressed: onTap,
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18),
+                const SizedBox(width: 7),
+              ],
+              Text(label),
+            ],
+          ),
         ),
       ),
     );
@@ -113,7 +170,11 @@ class EmptyState extends StatelessWidget {
               child: Icon(icon, size: 32, color: theme.colorScheme.primary),
             ),
             const SizedBox(height: 18),
-            Text(title, style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+            Text(
+              title,
+              style: theme.textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 340),
@@ -123,10 +184,7 @@ class EmptyState extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
             ),
-            if (action != null) ...[
-              const SizedBox(height: 20),
-              action!,
-            ],
+            if (action != null) ...[const SizedBox(height: 20), action!],
           ],
         ),
       ),
@@ -215,11 +273,7 @@ class _PressableState extends State<Pressable> {
 }
 
 class StaggeredEntry extends StatelessWidget {
-  const StaggeredEntry({
-    super.key,
-    required this.index,
-    required this.child,
-  });
+  const StaggeredEntry({super.key, required this.index, required this.child});
 
   final int index;
   final Widget child;
@@ -256,28 +310,42 @@ class BrandMark extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [primary, Color.lerp(primary, Colors.black, 0.28)!],
-        ),
+        color: AppColors.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(size * 0.32),
+        border: Border.all(color: primary.withValues(alpha: 0.32)),
+        boxShadow: [
+          BoxShadow(
+            color: primary.withValues(alpha: 0.12),
+            blurRadius: size * 0.5,
+          ),
+        ],
       ),
       child: Center(
-        child: Icon(Icons.water_drop_rounded, color: Colors.white, size: size * 0.52),
+        child: Icon(
+          Icons.water_drop_rounded,
+          color: primary,
+          size: size * 0.52,
+        ),
       ),
     );
   }
 }
 
-String formatRelative(int millis) {
+String formatRelative(int millis, {bool english = false}) {
   if (millis <= 0) return '';
+  final l = L10n(english);
   final then = DateTime.fromMillisecondsSinceEpoch(millis);
   final diff = DateTime.now().difference(then);
-  if (diff.inSeconds < 60) return 'baru saja';
-  if (diff.inMinutes < 60) return '${diff.inMinutes} menit lalu';
-  if (diff.inHours < 24) return '${diff.inHours} jam lalu';
-  if (diff.inDays < 7) return '${diff.inDays} hari lalu';
+  if (diff.inSeconds < 60) return l.t('common.justNow');
+  if (diff.inMinutes < 60) {
+    return l.t('common.minutesAgo', {'count': '${diff.inMinutes}'});
+  }
+  if (diff.inHours < 24) {
+    return l.t('common.hoursAgo', {'count': '${diff.inHours}'});
+  }
+  if (diff.inDays < 7) {
+    return l.t('common.daysAgo', {'count': '${diff.inDays}'});
+  }
   final d = then.toLocal();
   return '${d.day}/${d.month}/${d.year}';
 }
@@ -285,5 +353,11 @@ String formatRelative(int millis) {
 String formatBytes(int size) {
   if (size < 1024) return '$size B';
   if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
-  return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  if (size < 1024 * 1024 * 1024) {
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  if (size < 1024 * 1024 * 1024 * 1024) {
+    return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+  return '${(size / (1024 * 1024 * 1024 * 1024)).toStringAsFixed(1)} TB';
 }

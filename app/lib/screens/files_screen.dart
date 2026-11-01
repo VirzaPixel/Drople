@@ -1,23 +1,23 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../models/file_transfer.dart';
 import '../models/peer.dart';
 import '../services/drople_file.dart';
 import '../services/drople_network.dart';
+import '../services/storage_info.dart';
 import '../theme/app_theme.dart';
+import '../widgets/qr_scanner_screen.dart';
 import '../widgets/ui.dart';
 
 enum _FileFilter { all, incoming, outgoing }
 
 class FilesScreen extends StatefulWidget {
-  const FilesScreen({
-    super.key,
-    required this.files,
-    required this.network,
-  });
+  const FilesScreen({super.key, required this.files, required this.network});
 
   final DropleFile files;
   final DropleNetwork network;
@@ -30,13 +30,27 @@ class _FilesScreenState extends State<FilesScreen> {
   List<FileTransferItem> _transfers = const [];
   _FileFilter _filter = _FileFilter.all;
   Timer? _ticker;
+  Timer? _storageTicker;
+  ({int free, int total})? _storage;
   String _lastSignature = '';
+  final TextEditingController _search = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _load(silent: false);
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _load());
+    _loadStorage();
+    _storageTicker = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _loadStorage(),
+    );
+  }
+
+  Future<void> _loadStorage() async {
+    final info = await StorageInfo.read();
+    if (!mounted || info == null) return;
+    setState(() => _storage = info);
   }
 
   void _load({bool silent = true}) {
@@ -53,19 +67,23 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   List<FileTransferItem> get _visible {
+    final query = _search.text.trim().toLowerCase();
     return _transfers.where((t) {
-      return switch (_filter) {
+      final matchFilter = switch (_filter) {
         _FileFilter.all => true,
         _FileFilter.incoming => !t.isSend,
         _FileFilter.outgoing => t.isSend,
       };
+      if (!matchFilter) return false;
+      return query.isEmpty || t.fileName.toLowerCase().contains(query);
     }).toList();
   }
 
   Future<void> _pickAndSend() async {
+    final l = context.l10n;
     final peers = widget.network.listPeers().where((p) => p.connected).toList();
     if (peers.isEmpty) {
-      _toast('Hubungkan perangkat terlebih dahulu di tab Perangkat');
+      _toast(l.t('files.connectFirst'));
       return;
     }
     final peer = await _choosePeer(peers);
@@ -75,11 +93,58 @@ class _FilesScreenState extends State<FilesScreen> {
     if (file == null || file.path == null) return;
     try {
       widget.files.sendFile(peer.id, file.path!);
-      _toast('Mengirim ${file.name} ke ${peer.name}');
+      _toast(l.t('files.sending', {'file': file.name, 'peer': peer.name}));
       _load(silent: false);
     } catch (_) {
-      _toast('Gagal memulai pengiriman');
+      _toast(l.t('files.startFailed'));
     }
+  }
+
+  Future<void> _scanConnect() async {
+    final l = context.l10n;
+    if (!(Platform.isAndroid || Platform.isIOS)) {
+      _toast(l.t('files.scanAndroid'));
+      return;
+    }
+    final scanned = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const QrScannerScreen()));
+    if (scanned == null || scanned.trim().isEmpty) return;
+    final raw = scanned.trim();
+    final code =
+        (raw.toUpperCase().startsWith('DRO1:') ? raw.substring(5) : raw)
+            .replaceAll(RegExp(r'[\s-]'), '')
+            .toUpperCase();
+    if (code.length < 4) {
+      _toast(l.t('files.invalidCode'));
+      return;
+    }
+    try {
+      await widget.network.connectPairing(code);
+      _toast(l.t('files.pairSent'));
+    } catch (_) {
+      _toast(l.t('files.connectFailed'));
+    }
+  }
+
+  IconData _fileIcon(FileTransferItem item) {
+    final name = item.fileName.toLowerCase();
+    if (item.isFailed) return Icons.error_outline_rounded;
+    if (name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png') ||
+        name.endsWith('.webp') ||
+        name.endsWith('.gif')) {
+      return Icons.image_outlined;
+    }
+    if (name.endsWith('.apk')) return Icons.android_rounded;
+    if (name.endsWith('.zip') ||
+        name.endsWith('.rar') ||
+        name.endsWith('.7z')) {
+      return Icons.folder_zip_outlined;
+    }
+    if (name.endsWith('.pdf')) return Icons.picture_as_pdf_outlined;
+    return item.isSend ? Icons.north_east_rounded : Icons.south_west_rounded;
   }
 
   Future<PeerEntry?> _choosePeer(List<PeerEntry> peers) {
@@ -95,15 +160,23 @@ class _FilesScreenState extends State<FilesScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Kirim ke perangkat', style: theme.textTheme.titleLarge),
+                Text(
+                  ctx.l10n.t('files.choosePeer'),
+                  style: theme.textTheme.titleLarge,
+                ),
                 const SizedBox(height: 4),
-                Text('Pilih tujuan transfer file.', style: theme.textTheme.bodySmall),
+                Text(
+                  ctx.l10n.t('files.choosePeerHint'),
+                  style: theme.textTheme.bodySmall,
+                ),
                 const SizedBox(height: 14),
                 ...peers.map(
                   (peer) => ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
-                      backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.12),
+                      backgroundColor: theme.colorScheme.primary.withValues(
+                        alpha: 0.12,
+                      ),
                       foregroundColor: theme.colorScheme.primary,
                       child: Text(
                         peer.name.trim().isEmpty
@@ -113,7 +186,9 @@ class _FilesScreenState extends State<FilesScreen> {
                     ),
                     title: Text(peer.name),
                     subtitle: Text(
-                      peer.code.isEmpty ? peer.shortId : 'Kode ${peer.code}',
+                      peer.code.isEmpty
+                          ? peer.shortId
+                          : ctx.l10n.t('files.code', {'code': peer.code}),
                     ),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.pop(ctx, peer),
@@ -149,8 +224,8 @@ class _FilesScreenState extends State<FilesScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l = context.l10n;
     final visible = _visible;
-    final active = _transfers.where((t) => t.isActive || t.status == 'pending').length;
 
     return Scaffold(
       body: SafeArea(
@@ -160,78 +235,58 @@ class _FilesScreenState extends State<FilesScreen> {
             child: RefreshIndicator(
               onRefresh: () async => _load(silent: false),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 children: [
-                  Row(
-                    children: [
-                      const BrandMark(size: 44),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('File', style: theme.textTheme.headlineMedium),
-                            Text(
-                              '${_transfers.length} transfer · ${active == 0 ? 'tidak ada proses aktif' : '$active sedang berjalan'}',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton.filled(
-                        tooltip: 'Kirim file',
-                        onPressed: _pickAndSend,
-                        icon: const Icon(Icons.add_rounded),
-                      ),
-                    ],
+                  SectionHeader(
+                    title: l.t('files.title'),
+                    subtitle: l.t('files.subtitle'),
                   ),
-                  const SizedBox(height: 18),
-                  _dropZone(theme),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SegmentedButton<_FileFilter>(
-                          segments: const [
-                            ButtonSegment(
-                              value: _FileFilter.all,
-                              label: Text('Semua'),
+                  _actionRow(),
+                  const SizedBox(height: 12),
+                  _statsRow(theme),
+                  const SizedBox(height: 12),
+                  _tabs(theme),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: l.t('files.searchHint'),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 19),
+                      suffixIcon: _search.text.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              onPressed: () {
+                                _search.clear();
+                                setState(() {});
+                              },
                             ),
-                            ButtonSegment(
-                              value: _FileFilter.incoming,
-                              label: Text('Masuk'),
-                            ),
-                            ButtonSegment(
-                              value: _FileFilter.outgoing,
-                              label: Text('Keluar'),
-                            ),
-                          ],
-                          selected: {_filter},
-                          showSelectedIcon: false,
-                          onSelectionChanged: (value) =>
-                              setState(() => _filter = value.first),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   if (visible.isEmpty)
                     EmptyState(
                       icon: Icons.folder_open_rounded,
-                      title: 'Belum ada transfer',
-                      message:
-                          'Pilih file lewat tombol di atas. File yang diterima bisa langsung dibuka atau dipasang dari sini.',
-                      action: FilledButton.icon(
-                        onPressed: _pickAndSend,
-                        icon: const Icon(Icons.upload_file_rounded),
-                        label: const Text('Pilih File'),
-                      ),
+                      title: _search.text.trim().isEmpty
+                          ? l.t('files.emptyTitle')
+                          : l.t('files.emptySearch'),
+                      message: _search.text.trim().isEmpty
+                          ? l.t('files.emptyMessage')
+                          : l.t('files.searchMessage'),
+                      action: _search.text.trim().isEmpty
+                          ? FilledButton.icon(
+                              onPressed: _pickAndSend,
+                              icon: const Icon(Icons.upload_file_rounded),
+                              label: Text(l.t('files.pickFile')),
+                            )
+                          : null,
                     )
                   else
                     ...List.generate(
                       visible.length,
                       (i) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.only(bottom: 10),
                         child: StaggeredEntry(
                           index: i,
                           child: _transferCard(theme, visible[i]),
@@ -247,162 +302,382 @@ class _FilesScreenState extends State<FilesScreen> {
     );
   }
 
-  Widget _dropZone(ThemeData theme) {
-    return Pressable(
-      onTap: _pickAndSend,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 20),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: theme.colorScheme.primary.withValues(alpha: 0.22),
-            width: 1.5,
+  Widget _actionRow() {
+    final l = context.l10n;
+    return Row(
+      children: [
+        Expanded(
+          child: PrimaryButton(
+            label: l.t('files.sendFile'),
+            icon: Icons.upload_file_rounded,
+            height: 48,
+            onTap: _pickAndSend,
           ),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(16),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 48,
+          height: 48,
+          child: OutlinedButton(
+            onPressed: _scanConnect,
+            style: OutlinedButton.styleFrom(
+              padding: EdgeInsets.zero,
+              backgroundColor: AppColors.surfaceContainer.withValues(
+                alpha: 0.8,
               ),
-              child: Icon(
-                Icons.upload_file_rounded,
-                color: theme.colorScheme.primary,
-                size: 26,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Kirim file tanpa internet', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Pilih file dari perangkat, lalu tentukan tujuan.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
               ),
             ),
-            Icon(Icons.chevron_right_rounded, color: theme.colorScheme.primary),
-          ],
+            child: const Icon(
+              Icons.qr_code_scanner_rounded,
+              size: 21,
+              color: AppColors.primary,
+            ),
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _statsRow(ThemeData theme) {
+    final l = context.l10n;
+    final active = _transfers
+        .where((t) => t.isActive || t.status == 'pending')
+        .length;
+    final received = _transfers
+        .where((t) => !t.isSend && t.isCompleted)
+        .fold<int>(0, (sum, t) => sum + t.fileSize);
+
+    final storage = _storage;
+    return Row(
+      children: [
+        Expanded(
+          child: _statCard(
+            theme,
+            icon: Icons.speed_rounded,
+            label: l.t('files.active'),
+            value: '$active',
+            suffix: l.t('files.running'),
+            footer: l.t('files.e2ee'),
+            dot: true,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _statCard(
+            theme,
+            icon: Icons.download_rounded,
+            label: l.t('files.received'),
+            value: formatBytes(received),
+            suffix: '',
+            footer: l.t('files.filesCount', {
+              'count':
+                  '${_transfers.where((t) => !t.isSend && t.isCompleted).length}',
+            }),
+            dot: false,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _statCard(
+            theme,
+            icon: Icons.storage_rounded,
+            label: l.t('files.storage'),
+            value: storage == null ? '—' : formatBytes(storage.free),
+            suffix: storage == null ? '' : l.t('files.free'),
+            footer: storage == null
+                ? l.t('files.unavailable')
+                : l.t('files.ofTotal', {'size': formatBytes(storage.total)}),
+            dot: false,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _statCard(
+    ThemeData theme, {
+    required IconData icon,
+    required String label,
+    required String value,
+    required String suffix,
+    required String footer,
+    required bool dot,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainer.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.surfaceContainerHigh),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: AppColors.primary),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
+                ),
+              ),
+              const Icon(
+                Icons.lock_outline_rounded,
+                size: 10,
+                color: AppColors.onSurfaceVariant,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text.rich(
+            TextSpan(
+              text: value,
+              style: inter(16, weight: FontWeight.w700),
+              children: [
+                if (suffix.isNotEmpty)
+                  TextSpan(
+                    text: ' $suffix',
+                    style: inter(11, color: AppColors.onSurfaceVariant),
+                  ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (dot) ...[
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+              ],
+              Expanded(
+                child: Text(
+                  footer,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: inter(
+                    10,
+                    weight: FontWeight.w500,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tabs(ThemeData theme) {
+    final l = context.l10n;
+    final labels = [
+      l.t('files.all'),
+      l.t('files.incoming'),
+      l.t('files.outgoing'),
+    ];
+    final values = [
+      _FileFilter.all,
+      _FileFilter.incoming,
+      _FileFilter.outgoing,
+    ];
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.surfaceContainerHigh.withValues(alpha: 0.7),
+        ),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _filter = values[i]),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  padding: const EdgeInsets.symmetric(vertical: 7),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _filter == values[i]
+                        ? AppColors.surfaceContainerHighest
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    labels[i],
+                    style: inter(
+                      11,
+                      weight: _filter == values[i]
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      color: _filter == values[i]
+                          ? AppColors.onSurface
+                          : AppColors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
 
   Widget _transferCard(ThemeData theme, FileTransferItem item) {
+    final l = context.l10n;
     final isActive = item.status == 'active' || item.status == 'pending';
     final isDone = item.isCompleted;
     final isFailed = item.isFailed;
     final accent = isFailed
         ? AppColors.danger
         : isDone
-            ? AppColors.leaf
-            : theme.colorScheme.primary;
+        ? AppColors.primary
+        : theme.colorScheme.primary;
     final peer = _peerName(item.peerId);
 
-    final String subtitle;
+    final direction = l.t(item.isSend ? 'files.to' : 'files.from');
+    final String meta;
     if (isFailed) {
-      subtitle = 'Gagal · ${formatBytes(item.fileSize)}';
+      meta = l.t('files.failedMeta', {'size': formatBytes(item.fileSize)});
     } else if (isDone) {
-      subtitle = 'Selesai · ${formatBytes(item.fileSize)} · ${formatRelative(item.completedAt ?? item.createdAt)}';
+      meta = '${formatBytes(item.fileSize)} • $direction $peer';
     } else {
-      subtitle = '${formatBytes(item.progress)} dari ${formatBytes(item.fileSize)}';
+      meta =
+          '${formatBytes(item.progress)} / ${formatBytes(item.fileSize)} • $direction $peer';
     }
 
-    return Pressable(
-      onTap: isDone ? () => _open(item) : null,
-      child: AppCard(
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(13),
-              ),
-              child: Icon(
-                item.isSend ? Icons.north_east_rounded : Icons.south_west_rounded,
-                color: accent,
-                size: 21,
-              ),
+    final String actionLabel;
+    if (isDone) {
+      actionLabel = l.t('files.open');
+    } else if (isFailed) {
+      actionLabel = l.t('files.failed');
+    } else {
+      actionLabel = l.t('files.processing');
+    }
+
+    return AppCard(
+      padding: const EdgeInsets.all(12),
+      color: isFailed ? AppColors.danger.withValues(alpha: 0.06) : null,
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: isFailed
+                  ? AppColors.danger.withValues(alpha: 0.14)
+                  : AppColors.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(11),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.fileName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(fontSize: 14.5),
-                        ),
-                      ),
-                      if (isDone)
-                        Icon(
-                          Icons.open_in_new_rounded,
-                          size: 15,
-                          color: theme.colorScheme.outline,
-                        ),
-                    ],
+            child: Icon(
+              _fileIcon(item),
+              size: 20,
+              color: isFailed ? AppColors.danger : AppColors.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  meta,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: inter(
+                    10.5,
+                    weight: FontWeight.w500,
+                    color: isFailed
+                        ? AppColors.danger
+                        : AppColors.onSurfaceVariant,
+                  ),
+                ),
+                if (isActive) ...[
+                  const SizedBox(height: 7),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: LinearProgressIndicator(
+                      value: item.percent == 0 ? null : item.percent,
+                      minHeight: 4,
+                      backgroundColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                      color: accent,
+                    ),
                   ),
                   const SizedBox(height: 3),
-                  Text(
-                    '${item.isSend ? 'Ke' : 'Dari'} $peer',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  if (isActive) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(99),
-                      child: LinearProgressIndicator(
-                        value: item.percent == 0 ? null : item.percent,
-                        minHeight: 5,
-                        backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                        color: accent,
-                      ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '${(item.percent * 100).toStringAsFixed(0)}%',
+                      style: inter(10, weight: FontWeight.w600, color: accent),
                     ),
-                    const SizedBox(height: 5),
-                  ],
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelSmall?.copyWith(fontSize: 10.5),
-                        ),
-                      ),
-                      if (isActive)
-                        Text(
-                          '${(item.percent * 100).toStringAsFixed(0)}%',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: accent,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 10.5,
-                          ),
-                        ),
-                    ],
                   ),
                 ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 82,
+            height: 36,
+            child: OutlinedButton(
+              onPressed: isDone ? () => _open(item) : null,
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.zero,
+                backgroundColor: isFailed
+                    ? AppColors.danger.withValues(alpha: 0.12)
+                    : AppColors.surfaceContainerLowest,
+                side: BorderSide(
+                  color: isFailed
+                      ? AppColors.danger.withValues(alpha: 0.3)
+                      : AppColors.surfaceContainerHigh,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Text(
+                actionLabel,
+                style: inter(
+                  11,
+                  weight: FontWeight.w600,
+                  color: isFailed
+                      ? AppColors.danger
+                      : isDone
+                      ? AppColors.onSurface
+                      : AppColors.onSurfaceVariant,
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -410,6 +685,8 @@ class _FilesScreenState extends State<FilesScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _storageTicker?.cancel();
+    _search.dispose();
     super.dispose();
   }
 }

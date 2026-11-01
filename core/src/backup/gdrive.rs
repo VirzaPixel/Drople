@@ -125,33 +125,92 @@ pub fn disconnect() -> Result<()> {
     })
 }
 
-fn client_credentials() -> Result<(String, String)> {
-    let stored = with_conn(|conn| {
-        Ok((
-            db::get_setting(conn, KEY_CLIENT_ID)?,
-            db::get_setting(conn, KEY_CLIENT_SECRET)?,
-        ))
-    })?;
-    let client_id = stored
-        .0
+pub fn configured_client_id() -> Result<String> {
+    let stored = with_conn(|conn| db::get_setting(conn, KEY_CLIENT_ID))?;
+    Ok(stored
         .or_else(|| std::env::var("DROPLE_GOOGLE_CLIENT_ID").ok())
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            DropleError::Auth(
-                "client id Google OAuth belum diset (set gdrive_client_id atau DROPLE_GOOGLE_CLIENT_ID)"
-                    .into(),
-            )
-        })?;
-    let client_secret = stored
-        .1
+        .unwrap_or_default()
+        .trim()
+        .to_string())
+}
+
+pub fn has_client_secret() -> Result<bool> {
+    let stored = with_conn(|conn| db::get_setting(conn, KEY_CLIENT_SECRET))?;
+    Ok(stored
         .or_else(|| std::env::var("DROPLE_GOOGLE_CLIENT_SECRET").ok())
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| {
-            DropleError::Auth(
-                "client secret Google OAuth belum diset (set gdrive_client_secret atau DROPLE_GOOGLE_CLIENT_SECRET)"
-                    .into(),
-            )
-        })?;
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false))
+}
+
+/// Menukar authorization code OAuth (loopback + PKCE) menjadi token.
+pub fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result<()> {
+    if code.trim().is_empty() || verifier.trim().is_empty() || redirect_uri.trim().is_empty() {
+        return Err(DropleError::InvalidInput(
+            "code, verifier, dan redirect URI wajib diisi".into(),
+        ));
+    }
+    runtime()?.block_on(exchange_code_async(code, verifier, redirect_uri))
+}
+
+async fn exchange_code_async(
+    code: &str,
+    verifier: &str,
+    redirect_uri: &str,
+) -> Result<()> {
+    let (client_id, client_secret) = client_credentials()?;
+    if client_secret.is_empty() {
+        return Err(DropleError::Auth(
+            "client secret Google OAuth belum diset".into(),
+        ));
+    }
+    let params = [
+        ("client_id", client_id.as_str()),
+        ("client_secret", client_secret.as_str()),
+        ("code", code),
+        ("code_verifier", verifier),
+        ("grant_type", "authorization_code"),
+        ("redirect_uri", redirect_uri),
+    ];
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| DropleError::Internal(format!("gagal membuat HTTP client: {e}")))?;
+    let resp = client
+        .post(TOKEN_URL)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| DropleError::Auth(format!("gagal menukar kode OAuth: {e}")))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(DropleError::Auth(format!(
+            "Google menolak kode OAuth ({}): {}",
+            status, text
+        )));
+    }
+    let body: TokenResponse = serde_json::from_str(&text)
+        .map_err(|e| DropleError::Auth(format!("respons token tidak valid: {e}")))?;
+    save_tokens(&TokenSet {
+        access_token: body.access_token,
+        refresh_token: body.refresh_token.unwrap_or_default(),
+        expires_at: db::now_millis() + body.expires_in.unwrap_or(3600) * 1000,
+    })
+}
+
+fn client_credentials() -> Result<(String, String)> {
+    let client_id = configured_client_id()?;
+    if client_id.is_empty() {
+        return Err(DropleError::Auth(
+            "client id Google OAuth belum diset".into(),
+        ));
+    }
+    let stored_secret = with_conn(|conn| db::get_setting(conn, KEY_CLIENT_SECRET))?;
+    let client_secret = stored_secret
+        .or_else(|| std::env::var("DROPLE_GOOGLE_CLIENT_SECRET").ok())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     Ok((client_id, client_secret))
 }
 
@@ -162,12 +221,14 @@ async fn refresh_token(client: &Client, tokens: &TokenSet) -> Result<TokenSet> {
         ));
     }
     let (client_id, client_secret) = client_credentials()?;
-    let params = [
+    let mut params = vec![
         ("client_id", client_id.as_str()),
-        ("client_secret", client_secret.as_str()),
         ("refresh_token", tokens.refresh_token.as_str()),
         ("grant_type", "refresh_token"),
     ];
+    if !client_secret.is_empty() {
+        params.push(("client_secret", client_secret.as_str()));
+    }
     let resp = client
         .post(TOKEN_URL)
         .form(&params)

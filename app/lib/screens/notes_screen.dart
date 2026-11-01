@@ -1,14 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../l10n/l10n.dart';
 import '../models/note.dart';
 import '../services/drople_core.dart';
 import '../theme/app_theme.dart';
+import '../widgets/markdown_editor.dart';
 import '../widgets/ui.dart';
 import 'note_editor.dart';
 
-enum _NoteFilter { all, favorite, pending }
+enum _NoteFilter { all, favorite }
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key, required this.core});
@@ -31,7 +34,10 @@ class _NotesScreenState extends State<NotesScreen> {
     super.initState();
     _load();
     _search.addListener(() => setState(() {}));
-    _ticker = Timer.periodic(const Duration(seconds: 2), (_) => _load(silent: true));
+    _ticker = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _load(silent: true),
+    );
   }
 
   void _load({bool silent = false}) {
@@ -53,7 +59,6 @@ class _NotesScreenState extends State<NotesScreen> {
       final matchFilter = switch (_filter) {
         _NoteFilter.all => true,
         _NoteFilter.favorite => note.isFavorite == 1,
-        _NoteFilter.pending => !note.isSynced,
       };
       if (!matchFilter) return false;
       if (query.isEmpty) return true;
@@ -65,14 +70,23 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<void> _open({NoteSummary? note}) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => NoteEditorScreen(
-          core: widget.core,
-          note: note,
-          onSaved: _load,
-        ),
+        builder: (_) =>
+            NoteEditorScreen(core: widget.core, note: note, onSaved: _load),
       ),
     );
     _load();
+  }
+
+  Future<void> _copy(NoteSummary note) async {
+    final l = context.l10n;
+    try {
+      final data = widget.core.getNote(note.id);
+      await Clipboard.setData(ClipboardData(text: data.content));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(l.t('notes.copied'))));
+    } catch (_) {}
   }
 
   Future<void> _toggleFavorite(NoteSummary note) async {
@@ -87,19 +101,21 @@ class _NotesScreenState extends State<NotesScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Hapus catatan?'),
+        title: Text(ctx.l10n.t('notes.deleteTitle')),
         content: Text(
-          note.title.trim().isEmpty ? 'Catatan tanpa judul' : note.title,
+          note.title.trim().isEmpty
+              ? ctx.l10n.t('notes.untitledNote')
+              : note.title,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
+            child: Text(ctx.l10n.t('notes.cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            child: const Text('Hapus'),
+            child: Text(ctx.l10n.t('notes.delete')),
           ),
         ],
       ),
@@ -113,40 +129,77 @@ class _NotesScreenState extends State<NotesScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l = context.l10n;
     final visible = _visible;
     final favoriteCount = _notes.where((n) => n.isFavorite == 1).length;
+    final countText = l.t('notes.count', {'count': '${_notes.length}'});
+    final favoriteText = l.t('notes.favoriteCount', {
+      'count': '$favoriteCount',
+    });
 
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1080),
+            constraints: const BoxConstraints(maxWidth: 900),
             child: CustomScrollView(
               slivers: [
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-                  sliver: SliverToBoxAdapter(child: _header(theme, favoriteCount)),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                   sliver: SliverToBoxAdapter(
-                    child: TextField(
-                      controller: _search,
-                      decoration: InputDecoration(
-                        hintText: 'Cari judul atau isi catatan',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                        suffixIcon: _search.text.isEmpty
-                            ? null
-                            : IconButton(
-                                icon: const Icon(Icons.close_rounded, size: 18),
-                                onPressed: () => _search.clear(),
-                              ),
-                      ),
+                    child: SectionHeader(
+                      title: l.t('notes.title'),
+                      subtitle: favoriteCount > 0
+                          ? '$countText · $favoriteText'
+                          : countText,
+                      trailing: _localPill(theme),
                     ),
                   ),
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: _localCard(theme, favoriteCount),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _search,
+                            decoration: InputDecoration(
+                              hintText: l.t('notes.searchHint'),
+                              prefixIcon: const Icon(
+                                Icons.search_rounded,
+                                size: 19,
+                              ),
+                              suffixIcon: _search.text.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      icon: const Icon(
+                                        Icons.close_rounded,
+                                        size: 18,
+                                      ),
+                                      onPressed: () => _search.clear(),
+                                    ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        PrimaryButton(
+                          label: l.t('notes.add'),
+                          icon: Icons.add_rounded,
+                          onTap: () => _open(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   sliver: SliverToBoxAdapter(child: _filters(theme)),
                 ),
                 if (visible.isEmpty)
@@ -157,23 +210,23 @@ class _NotesScreenState extends State<NotesScreen> {
                           ? Icons.edit_note_rounded
                           : Icons.search_off_rounded,
                       title: _notes.isEmpty
-                          ? 'Belum ada catatan'
-                          : 'Tidak ada hasil',
+                          ? l.t('notes.emptyTitle')
+                          : l.t('notes.noResults'),
                       message: _notes.isEmpty
-                          ? 'Mulai catatan pertama. Semua tersimpan offline dan bisa disinkronkan lewat perangkat terdekat.'
-                          : 'Coba kata kunci lain atau ubah filter.',
+                          ? l.t('notes.emptyMessage')
+                          : l.t('notes.searchMessage'),
                       action: _notes.isEmpty
                           ? FilledButton.icon(
                               onPressed: () => _open(),
                               icon: const Icon(Icons.add_rounded),
-                              label: const Text('Buat Catatan'),
+                              label: Text(l.t('notes.create')),
                             )
                           : null,
                     ),
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 110),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
                     sliver: SliverLayoutBuilder(
                       builder: (context, constraints) {
                         final width = constraints.crossAxisExtent;
@@ -181,24 +234,26 @@ class _NotesScreenState extends State<NotesScreen> {
                         if (columns == 1) {
                           return SliverList.separated(
                             itemCount: visible.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 12),
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 12),
                             itemBuilder: (_, i) => StaggeredEntry(
                               index: i,
-                              child: _noteCard(theme, visible[i], i),
+                              child: _noteCard(theme, visible[i]),
                             ),
                           );
                         }
                         return SliverGrid(
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: columns,
-                            mainAxisSpacing: 14,
-                            crossAxisSpacing: 14,
-                            mainAxisExtent: 176,
-                          ),
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                mainAxisSpacing: 14,
+                                crossAxisSpacing: 14,
+                                mainAxisExtent: 184,
+                              ),
                           delegate: SliverChildBuilderDelegate(
                             (_, i) => StaggeredEntry(
                               index: i,
-                              child: _noteCard(theme, visible[i], i),
+                              child: _noteCard(theme, visible[i]),
                             ),
                             childCount: visible.length,
                           ),
@@ -211,62 +266,138 @@ class _NotesScreenState extends State<NotesScreen> {
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _open(),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Catatan'),
-      ),
     );
   }
 
-  Widget _header(ThemeData theme, int favorites) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const BrandMark(size: 46),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _localCard(ThemeData theme, int favorites) {
+    final l = context.l10n;
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainer.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.surfaceContainerHigh),
+      ),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Text('Drople', style: theme.textTheme.headlineMedium),
-              const SizedBox(height: 2),
-              Text(
-                _notes.isEmpty
-                    ? 'Ruang tenang untuk pikiranmu'
-                    : '${_notes.length} catatan · $favorites favorit · tersimpan lokal',
-                style: theme.textTheme.bodySmall,
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(
+                  Icons.assignment_turned_in_outlined,
+                  size: 20,
+                  color: AppColors.primary,
+                ),
               ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.wifi_tethering_rounded,
-                  size: 14, color: theme.colorScheme.primary),
-              const SizedBox(width: 6),
-              Text(
-                'P2P',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.primary,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l.t('notes.localTitle'),
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      l.t('notes.localMessage'),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  l.t('notes.offline'),
+                  style: inter(
+                    10,
+                    weight: FontWeight.w600,
+                    color: AppColors.primary,
+                  ),
                 ),
               ),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: 11),
+          Container(
+            padding: const EdgeInsets.only(top: 9),
+            decoration: const BoxDecoration(
+              border: Border(
+                top: BorderSide(color: AppColors.surfaceContainerHigh),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.smartphone_rounded,
+                  size: 14,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '${l.t('notes.count', {'count': '${_notes.length}'})} · '
+                  '${l.t('notes.favoriteCount', {'count': '$favorites'})}',
+                  style: theme.textTheme.labelSmall,
+                ),
+                const Spacer(),
+                const Icon(
+                  Icons.cloud_off_rounded,
+                  size: 13,
+                  color: AppColors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
+                Text(l.t('notes.noCloud'), style: theme.textTheme.labelSmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _localPill(ThemeData theme) {
+    final l = context.l10n;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.smartphone_rounded,
+            size: 11,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            l.t('notes.local'),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _filters(ThemeData theme) {
+    final l = context.l10n;
     Widget chip(String label, _NoteFilter value) {
       final selected = _filter == value;
       return ChoiceChip(
@@ -275,7 +406,11 @@ class _NotesScreenState extends State<NotesScreen> {
         onSelected: (_) => setState(() => _filter = value),
         showCheckmark: false,
         avatar: selected
-            ? Icon(Icons.check_rounded, size: 14, color: theme.colorScheme.primary)
+            ? Icon(
+                Icons.check_rounded,
+                size: 14,
+                color: theme.colorScheme.primary,
+              )
             : null,
       );
     }
@@ -284,94 +419,140 @@ class _NotesScreenState extends State<NotesScreen> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          chip('Semua', _NoteFilter.all),
+          chip(l.t('notes.all'), _NoteFilter.all),
           const SizedBox(width: 8),
-          chip('Favorit', _NoteFilter.favorite),
-          const SizedBox(width: 8),
-          chip('Perlu Sinkron', _NoteFilter.pending),
+          chip(l.t('notes.favorite'), _NoteFilter.favorite),
         ],
       ),
     );
   }
 
-  Widget _noteCard(ThemeData theme, NoteSummary note, int index) {
-    final title = note.title.trim().isEmpty ? 'Tanpa judul' : note.title.trim();
+  Widget _noteCard(ThemeData theme, NoteSummary note) {
+    final l = context.l10n;
+    final title = note.title.trim().isEmpty
+        ? l.t('notes.untitled')
+        : note.title.trim();
+    final preview = stripMarkdown(note.preview);
     final favorite = note.isFavorite == 1;
-    final accents = [
-      theme.colorScheme.primary,
-      AppColors.amber,
-      const Color(0xFF5B6FA8),
-      const Color(0xFFA8607A),
-    ];
-    final accent = accents[index % accents.length];
 
     return Pressable(
       onTap: () => _open(note: note),
       onLongPress: () => _delete(note),
       child: AppCard(
-        padding: const EdgeInsets.fromLTRB(18, 16, 14, 14),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Container(
-                  width: 6,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(fontSize: 16),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Text(
+                    l.t('notes.local'),
+                    style: inter(
+                      10,
+                      weight: FontWeight.w500,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 2),
+                IconButton(
+                  tooltip: l.t('notes.copyTooltip'),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  onPressed: () => _copy(note),
+                  icon: const Icon(
+                    Icons.content_copy_rounded,
+                    size: 16,
+                    color: AppColors.onSurfaceVariant,
                   ),
                 ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
                   onPressed: () => _toggleFavorite(note),
                   icon: Icon(
                     favorite ? Icons.star_rounded : Icons.star_border_rounded,
-                    size: 20,
-                    color: favorite ? AppColors.amber : theme.colorScheme.outline,
+                    size: 18,
+                    color: favorite
+                        ? AppColors.amber
+                        : theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: Text(
-                note.preview.trim().isEmpty
-                    ? 'Catatan kosong. Ketuk untuk mulai menulis.'
-                    : note.preview.trim().replaceAll('\n', ' '),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: note.preview.trim().isEmpty
-                      ? theme.colorScheme.outline
-                      : theme.colorScheme.onSurfaceVariant,
-                  height: 1.5,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: AppColors.surfaceContainerHigh.withValues(
+                      alpha: 0.7,
+                    ),
+                  ),
+                ),
+                child: Text(
+                  preview.isEmpty ? l.t('notes.emptyPreview') : preview,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: preview.isEmpty
+                        ? theme.colorScheme.outline
+                        : theme.colorScheme.onSurfaceVariant,
+                    height: 1.55,
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 9),
             Row(
               children: [
-                SyncBadge(status: note.syncStatus),
+                Icon(
+                  Icons.smartphone_rounded,
+                  size: 12,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  l.t('notes.savedLocal'),
+                  style: theme.textTheme.labelSmall,
+                ),
                 const Spacer(),
                 Text(
-                  formatRelative(note.updatedAt),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.outline,
-                    fontSize: 10.5,
-                  ),
+                  formatRelative(note.updatedAt, english: l.isEnglish),
+                  style: theme.textTheme.labelSmall,
                 ),
               ],
             ),
