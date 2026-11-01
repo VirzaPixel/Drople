@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:file_picker/file_picker.dart';
 import '../ffi/drople_bindings.dart';
 import '../models/file_transfer.dart';
 
@@ -18,28 +17,9 @@ class DropleFile {
   }
 
   /// Menyiapkan folder tujuan penerimaan file.
-  /// Menggunakan file picker native untuk memilih direktori.
-  Future<String?> setReceiveDirectory(String peerId) async {
-    // file_picker 13.x: result.files returns List<PlatformFile>
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.any,
-      dialogTitle: 'Pilih folder untuk menerima file dari $peerId',
-    );
-
-    // Handle null result safely
-    if (result == null) {
-      return null;
-    }
-
-    // result.files adalah List<PlatformFile>
-    final selectedDir = result.files.first.path;
-    
-    if (selectedDir == null) {
-      return null;
-    }
-
-    // Simpan path ke database Rust via FFI
-    return _bindings.fileReceive(peerId, selectedDir);
+  /// Gunakan input teks path (fallback jika file_picker unable build Android).
+  String setReceiveDirectory(String peerId, String savePath) {
+    return _bindings.fileReceive(peerId, savePath);
   }
 
   /// Mengambil daftar semua transfer file (riwayat + aktif).

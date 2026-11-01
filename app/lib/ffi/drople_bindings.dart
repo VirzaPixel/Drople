@@ -132,6 +132,10 @@ class DropleBindings {
   }
 
   static ffi.DynamicLibrary _load() {
+    if (Platform.isAndroid) {
+      return ffi.DynamicLibrary.open(_libName);
+    }
+
     final candidates = <String>[];
 
     final override = Platform.environment['DROPLE_CORE_LIB'];
