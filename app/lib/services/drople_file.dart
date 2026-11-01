@@ -20,19 +20,25 @@ class DropleFile {
   /// Menyiapkan folder tujuan penerimaan file.
   /// Menggunakan file picker native untuk memilih direktori.
   Future<String?> setReceiveDirectory(String peerId) async {
-    // Gunakan file picker native untuk memilih direktori
+    // file_picker 13.x: result.files returns List<PlatformFile>
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       dialogTitle: 'Pilih folder untuk menerima file dari $peerId',
     );
 
-    if (result == null || result.files.single.path == null) {
-      return null; // User membatalkan
+    // Handle null result safely
+    if (result == null) {
+      return null;
     }
 
-    final selectedDir = result.files.single.path!;
+    // result.files adalah List<PlatformFile>
+    final selectedDir = result.files.first.path;
+    
+    if (selectedDir == null) {
+      return null;
+    }
 
-    // Simpan path ke database Rust via FFI (menggunakan method yang sudah ada)
+    // Simpan path ke database Rust via FFI
     return _bindings.fileReceive(peerId, selectedDir);
   }
 
