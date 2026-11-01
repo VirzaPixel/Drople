@@ -7,6 +7,7 @@ class PeerEntry {
     this.latencyMs,
     required this.addresses,
     this.fingerprint = '',
+    this.code = '',
   });
 
   final String id;
@@ -16,6 +17,7 @@ class PeerEntry {
   final int? latencyMs;
   final List<String> addresses;
   final String fingerprint;
+  final String code;
 
   factory PeerEntry.fromJson(Map<String, dynamic> json) {
     return PeerEntry(
@@ -29,6 +31,7 @@ class PeerEntry {
               .toList() ??
           const [],
       fingerprint: json['fingerprint'] as String? ?? '',
+      code: json['code'] as String? ?? '',
     );
   }
 
@@ -41,6 +44,7 @@ class PeerEntry {
       'latency_ms': latencyMs,
       'addresses': addresses,
       'fingerprint': fingerprint,
+      'code': code,
     };
   }
 

@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:open_filex/open_filex.dart';
 
 import '../ffi/drople_bindings.dart';
 import '../models/file_transfer.dart';
@@ -17,9 +20,27 @@ class DropleFile {
   }
 
   /// Menyiapkan folder tujuan penerimaan file.
-  /// Gunakan input teks path (fallback jika file_picker unable build Android).
   String setReceiveDirectory(String peerId, String savePath) {
     return _bindings.fileReceive(peerId, savePath);
+  }
+
+  /// Menentukan folder default penerimaan file.
+  void setDefaultReceiveDirectory(String savePath) {
+    _bindings.fileSetReceiveDir(savePath);
+  }
+
+  /// Membuka file hasil transfer dengan aplikasi bawaan perangkat.
+  Future<String> openTransfer(FileTransferItem item) async {
+    final path = item.localPath;
+    if (path == null || path.trim().isEmpty) {
+      return 'Lokasi file tidak diketahui';
+    }
+    if (!File(path).existsSync()) {
+      return 'File sudah tidak ada di perangkat';
+    }
+    final result = await OpenFilex.open(path);
+    if (result.type == ResultType.done) return '';
+    return result.message.isEmpty ? 'Tidak ada aplikasi pembuka' : result.message;
   }
 
   /// Mengambil daftar semua transfer file (riwayat + aktif).

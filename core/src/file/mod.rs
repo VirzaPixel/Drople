@@ -51,6 +51,7 @@ pub fn file_send(peer_id: &str, file_path: &str) -> Result<String> {
             &file_hash,
             "send",
         )?;
+        db::set_file_transfer_local_path(&e.conn, &id, file_path)?;
         Ok(())
     })?;
 

@@ -26,6 +26,9 @@ pub enum DropleError {
     #[error("invalid pairing code")]
     InvalidPairingCode,
 
+    #[error("peer dengan kode tersebut belum ditemukan")]
+    PairingNotFound,
+
     #[error("network error: {0}")]
     Network(String),
 
@@ -63,6 +66,7 @@ impl DropleError {
             DropleError::Internal(_) => 6,
             DropleError::NotConnected => 7,
             DropleError::InvalidPairingCode => 8,
+            DropleError::PairingNotFound => 16,
             DropleError::Network(_) => 9,
             DropleError::Crypto(_) => 10,
             DropleError::RecoveryKeyMissing => 11,
@@ -81,7 +85,7 @@ impl DropleError {
             DropleError::InvalidInput(_) => "input",
             DropleError::Internal(_) => "internal",
             DropleError::NotConnected | DropleError::Network(_) => "network",
-            DropleError::InvalidPairingCode => "pairing",
+            DropleError::InvalidPairingCode | DropleError::PairingNotFound => "pairing",
             DropleError::Crypto(_) => "crypto",
             DropleError::RecoveryKeyMissing => "security",
             DropleError::DriveNotConnected | DropleError::QuotaExceeded | DropleError::DriveTransfer(_) => "google_drive",

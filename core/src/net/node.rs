@@ -42,12 +42,15 @@ pub struct PeerEntry {
     pub addresses: Vec<String>,
     #[serde(default)]
     pub fingerprint: String,
+    #[serde(default)]
+    pub code: String,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct SharedState {
     pub local_peer_id: String,
     pub local_fingerprint: String,
+    pub local_code: String,
     pub listen_addrs: Vec<String>,
     pub peers: BTreeMap<String, PeerEntry>,
 }
@@ -175,13 +178,19 @@ impl NodeHandle {
     }
 }
 
-pub fn spawn(keypair: Keypair, db_path: Option<String>) -> Result<NodeHandle> {
+pub fn spawn(
+    keypair: Keypair,
+    db_path: Option<String>,
+    device_name: String,
+) -> Result<NodeHandle> {
     let local_peer_id = keypair.public().to_peer_id().to_string();
     let local_fingerprint = identity::fingerprint_for(&keypair);
+    let local_code = pairing::short_code(&local_peer_id);
     let (cmd_tx, cmd_rx) = async_channel::unbounded();
     let shared = Arc::new(Mutex::new(SharedState {
         local_peer_id: local_peer_id.clone(),
         local_fingerprint,
+        local_code,
         ..Default::default()
     }));
 
@@ -196,7 +205,14 @@ pub fn spawn(keypair: Keypair, db_path: Option<String>) -> Result<NodeHandle> {
                 .build();
             match runtime {
                 Ok(rt) => {
-                    rt.block_on(run(keypair, cmd_rx, shared_thread, db_path, ready_tx));
+                    rt.block_on(run(
+                        keypair,
+                        device_name,
+                        cmd_rx,
+                        shared_thread,
+                        db_path,
+                        ready_tx,
+                    ));
                 }
                 Err(e) => {
                     let _ = ready_tx.send(Err(DropleError::Network(e.to_string())));
@@ -220,12 +236,13 @@ pub fn spawn(keypair: Keypair, db_path: Option<String>) -> Result<NodeHandle> {
 
 async fn run(
     keypair: Keypair,
+    device_name: String,
     cmd_rx: async_channel::Receiver<NetworkCommand>,
     shared: Arc<Mutex<SharedState>>,
     db_path: Option<String>,
     ready_tx: std::sync::mpsc::Sender<Result<()>>,
 ) {
-    let mut swarm = match build_swarm(keypair) {
+    let mut swarm = match build_swarm(keypair, device_name) {
         Ok(swarm) => swarm,
         Err(e) => {
             let _ = ready_tx.send(Err(e));
@@ -302,7 +319,7 @@ async fn run(
     }
 }
 
-fn build_swarm(keypair: Keypair) -> Result<Swarm<DropleBehaviour>> {
+fn build_swarm(keypair: Keypair, device_name: String) -> Result<Swarm<DropleBehaviour>> {
     let local_peer_id = keypair.public().to_peer_id();
     let codec =
         request_response::json::codec::Codec::<WireMessage, WireMessage>::default()
@@ -330,10 +347,10 @@ fn build_swarm(keypair: Keypair) -> Result<Swarm<DropleBehaviour>> {
                     mdns::Config::default(),
                     key.public().to_peer_id(),
                 )?,
-                identify: identify::Behaviour::new(identify::Config::new(
-                    "/drople/1.0.0".into(),
-                    key.public(),
-                )),
+                identify: identify::Behaviour::new(
+                    identify::Config::new("/drople/1.0.0".into(), key.public())
+                        .with_agent_version(format!("Drople|{device_name}")),
+                ),
                 ping: ping::Behaviour::default(),
                 wire: request_response::Behaviour::with_codec(
                     codec,
@@ -387,6 +404,7 @@ fn upsert_peer(
             latency_ms: None,
             addresses: Vec::new(),
             fingerprint: String::new(),
+            code: pairing::short_code(&id),
         });
         if let Some(n) = name {
             entry.name = n.to_string();
@@ -486,7 +504,17 @@ fn handle_swarm_event(
         },
         SwarmEvent::Behaviour(DropleBehaviourEvent::Identify(event)) => {
             if let identify::Event::Received { peer_id, info, .. } = event {
-                let name = info.agent_version;
+                let raw = info.agent_version;
+                let name = raw
+                    .strip_prefix("Drople|")
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        if raw.contains("libp2p") || raw.contains("rust-") {
+                            format!("Perangkat {}", &peer_id.to_string()[..6.min(peer_id.to_string().len())])
+                        } else {
+                            raw
+                        }
+                    });
                 upsert_peer(
                     shared,
                     db_conn,
@@ -966,11 +994,11 @@ mod tests {
 
     #[test]
     fn two_nodes_connect_over_loopback() {
-        let node_a = spawn(Keypair::generate_ed25519(), None).expect("spawn A");
+        let node_a = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
         node_a.wait_listen_addr(Duration::from_secs(5));
         let addr = tcp_loopback_addr(&node_a).expect("A punya listen addr");
 
-        let node_b = spawn(Keypair::generate_ed25519(), None).expect("spawn B");
+        let node_b = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn B");
         node_b.wait_listen_addr(Duration::from_secs(5));
         node_b.dial_addr(&addr);
 
@@ -1006,11 +1034,12 @@ mod tests {
         let content = b"Hello from Drople file transfer!";
         std::fs::write(&source, content).expect("source");
 
-        let node_a = spawn(Keypair::generate_ed25519(), None).expect("spawn A");
+        let node_a = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
         node_a.wait_listen_addr(Duration::from_secs(5));
         let node_b = spawn(
             Keypair::generate_ed25519(),
             Some(db_path.to_string_lossy().to_string()),
+            "Receiver".into(),
         )
         .expect("spawn B");
         node_b.wait_listen_addr(Duration::from_secs(5));
@@ -1053,8 +1082,8 @@ mod tests {
     #[test]
     #[ignore = "butuh multicast mDNS aktif di jaringan lokal"]
     fn two_nodes_discover_via_mdns() {
-        let node_a = spawn(Keypair::generate_ed25519(), None).expect("spawn A");
-        let node_b = spawn(Keypair::generate_ed25519(), None).expect("spawn B");
+        let node_a = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
+        let node_b = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn B");
 
         let peer_a = node_a.local_peer_id().to_string();
         let started = std::time::Instant::now();

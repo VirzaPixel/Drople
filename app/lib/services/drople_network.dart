@@ -1,20 +1,34 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:device_info_plus/device_info_plus.dart';
 
 import '../ffi/drople_bindings.dart';
 import '../models/peer.dart';
 
-/// Wrapper tingkat tinggi untuk fungsi jaringan P2P Core Rust via FFI.
+/// Wrapper jaringan P2P. Satu instance global dipakai seluruh aplikasi agar
+/// koneksi peer tidak terputus saat berpindah halaman.
 class DropleNetwork {
   DropleNetwork({DropleBindings? bindings}) : _injected = bindings;
+
+  static final DropleNetwork shared = DropleNetwork();
 
   final DropleBindings? _injected;
   late final DropleBindings _bindings = _injected ?? DropleBindings.instance;
 
-  bool _started = false;
+  static bool _started = false;
+  static String? _deviceName;
 
-  /// Memulai node P2P (mDNS + Noise + TCP/Relay).
-  Future<void> start() async {
+  bool get isStarted => _started;
+  String? get deviceName => _deviceName;
+
+  Future<void> start({String? name}) async {
     if (_started) return;
+    final resolved = name ?? await _detectDeviceName();
+    _deviceName = resolved;
+    try {
+      _bindings.setDeviceName(resolved);
+    } catch (_) {}
     final rc = _bindings.networkStart();
     if (rc != 0) {
       throw StateError('drople_network_start gagal (kode $rc)');
@@ -22,20 +36,56 @@ class DropleNetwork {
     _started = true;
   }
 
-  /// Menghentikan node P2P.
   Future<void> stop() async {
     if (!_started) return;
     _bindings.networkStop();
     _started = false;
   }
 
-  /// Mengembalikan Peer ID lokal (base58).
+  Future<String> _detectDeviceName() async {
+    try {
+      final info = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final android = await info.androidInfo;
+        return _titleCase('${android.manufacturer} ${android.model}');
+      }
+      if (Platform.isIOS) {
+        final ios = await info.iosInfo;
+        return ios.name.trim().isEmpty ? 'iPhone' : ios.name.trim();
+      }
+      if (Platform.isMacOS) {
+        final mac = await info.macOsInfo;
+        return mac.computerName.trim().isEmpty ? 'Mac' : mac.computerName.trim();
+      }
+      if (Platform.isWindows) {
+        final win = await info.windowsInfo;
+        return win.computerName.trim().isEmpty ? 'Windows' : win.computerName.trim();
+      }
+      if (Platform.isLinux) {
+        final linux = await info.linuxInfo;
+        final pretty = linux.prettyName.trim();
+        if (pretty.isNotEmpty) return pretty;
+      }
+    } catch (_) {}
+    final host = Platform.localHostname.trim();
+    return host.isEmpty ? 'Perangkat Drople' : host;
+  }
+
+  String _titleCase(String value) {
+    final cleaned = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (cleaned.isEmpty) return 'Perangkat Drople';
+    return cleaned
+        .split(' ')
+        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+  }
+
   String localPeerId() => _bindings.localPeerId();
 
-  /// Mengembalikan fingerprint SHA-256 lokal yang mudah dibaca.
   String localFingerprint() => _bindings.localFingerprint();
 
-  /// Mengembalikan daftar peer yang ditemukan/dihubungkan (JSON).
+  String localShortCode() => _bindings.localShortCode();
+
   List<PeerEntry> listPeers() {
     final data = jsonDecode(_bindings.peersListJson()) as List<dynamic>;
     return data
@@ -43,17 +93,12 @@ class DropleNetwork {
         .toList();
   }
 
-  /// Membuat pairing code (prefix `DRO1:`) untuk ditampilkan sebagai QR/teks.
-  Future<String> startPairing() async {
-    return _bindings.pairingStart();
-  }
+  Future<String> startPairing() async => _bindings.pairingStart();
 
-  /// Terhubung ke peer menggunakan pairing code.
   Future<void> connectPairing(String code) async {
     _bindings.pairingConnect(code);
   }
 
-  /// Menambahkan relay server (multiaddr lengkap dengan `/p2p/<peerid>`).
   Future<void> addRelay(String addr) async {
     _bindings.addRelay(addr);
   }

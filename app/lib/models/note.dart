@@ -5,6 +5,7 @@ class NoteSummary {
     required this.updatedAt,
     required this.isFavorite,
     this.syncStatus = 'synced',
+    this.preview = '',
   });
 
   final String id;
@@ -12,6 +13,7 @@ class NoteSummary {
   final int updatedAt;
   final int isFavorite;
   final String syncStatus;
+  final String preview;
 
   factory NoteSummary.fromJson(Map<String, dynamic> json) {
     return NoteSummary(
@@ -20,6 +22,7 @@ class NoteSummary {
       updatedAt: (json['updated_at'] as num).toInt(),
       isFavorite: (json['is_favorite'] as num).toInt(),
       syncStatus: json['sync_status'] as String? ?? 'synced',
+      preview: json['preview'] as String? ?? '',
     );
   }
 

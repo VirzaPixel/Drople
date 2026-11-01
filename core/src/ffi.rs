@@ -141,6 +141,15 @@ pub extern "C" fn drople_note_delete(id: *const c_char) -> c_int {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn drople_note_set_favorite(id: *const c_char, favorite: c_int) -> c_int {
+    let id = match cstr_to_string(id) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| with_conn(|conn| db::set_note_favorite(conn, &id, favorite != 0)))
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn drople_note_list(out_json: *mut *mut c_char) -> c_int {
     run(|| {
         let json = with_conn(|conn| {
@@ -221,6 +230,23 @@ pub extern "C" fn drople_network_start() -> c_int {
 pub extern "C" fn drople_network_stop() -> c_int {
     crate::net::stop();
     0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_set_device_name(name: *const c_char) -> c_int {
+    let name = match cstr_to_string(name) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| crate::net::set_device_name(&name))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_local_short_code(out_code: *mut *mut c_char) -> c_int {
+    run(|| {
+        let code = crate::net::local_short_code()?;
+        write_out(out_code, code)
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -315,6 +341,15 @@ pub extern "C" fn drople_file_receive(
         let id = crate::file::file_receive(&peer_id, &save_path)?;
         write_out(out_transfer_id, id)
     })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_file_set_receive_dir(path: *const c_char) -> c_int {
+    let path = match cstr_to_string(path) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| crate::net::set_receive_dir(&path))
 }
 
 #[unsafe(no_mangle)]

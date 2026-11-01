@@ -12,6 +12,8 @@ use node::NodeHandle;
 
 static NETWORK: OnceLock<Mutex<Option<NodeHandle>>> = OnceLock::new();
 
+pub const DEVICE_NAME_SETTING: &str = "device_name";
+
 fn slot() -> &'static Mutex<Option<NodeHandle>> {
     NETWORK.get_or_init(|| Mutex::new(None))
 }
@@ -33,7 +35,10 @@ pub fn start() -> Result<()> {
 
     let keypair = identity::load_or_create()?;
     let db_path = with_engine(|e| Ok(e.path.clone()))?;
-    let handle = node::spawn(keypair, Some(db_path))?;
+    let device_name = with_engine(|e| db::get_setting(&e.conn, DEVICE_NAME_SETTING))?
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "Perangkat Drople".to_string());
+    let handle = node::spawn(keypair, Some(db_path), device_name)?;
     handle.wait_listen_addr(std::time::Duration::from_secs(3));
 
     let mut guard = lock()?;
@@ -65,6 +70,20 @@ pub fn local_fingerprint() -> Result<String> {
     handle_with(|h| Ok(h.snapshot().local_fingerprint))
 }
 
+pub fn local_short_code() -> Result<String> {
+    handle_with(|h| Ok(h.snapshot().local_code))
+}
+
+/// Menyimpan nama perangkat yang akan terlihat oleh peer lain.
+pub fn set_device_name(name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(DropleError::InvalidInput("nama perangkat kosong".into()));
+    }
+    let name: String = name.chars().take(48).collect();
+    with_engine(|e| db::set_setting(&e.conn, DEVICE_NAME_SETTING, &name))
+}
+
 pub fn peers_json() -> Result<String> {
     let guard = lock()?;
     let peers = match guard.as_ref() {
@@ -74,25 +93,21 @@ pub fn peers_json() -> Result<String> {
     Ok(serde_json::to_string(&peers)?)
 }
 
+/// Mengembalikan kode pairing pendek 6 karakter untuk perangkat ini.
 pub fn pairing_start() -> Result<String> {
-    handle_with(|handle| {
-        let state = handle.snapshot();
-        let addrs = state
-            .listen_addrs
-            .iter()
-            .filter(|a| !a.contains("/ip4/127.0.0.1/") && !a.contains("/ip6/::1/"))
-            .cloned()
-            .collect::<Vec<_>>();
-        Ok(pairing::new_code(
-            state.local_peer_id,
-            addrs,
-            state.local_fingerprint,
-        ))
-    })
+    local_short_code()
 }
 
 pub fn pairing_connect(code: &str) -> Result<()> {
-    let payload = pairing::decode(code)?;
+    let trimmed = code.trim();
+    let normalized = pairing::normalize_short(trimmed);
+
+    // Kode pendek (QR 6 karakter) atau kode panjang DRO1:<base64>.
+    if !normalized.is_empty() && normalized.len() <= 10 {
+        return connect_short_code(&normalized);
+    }
+
+    let payload = pairing::decode(trimmed)?;
     with_engine(|e| {
         db::upsert_peer(
             &e.conn,
@@ -106,6 +121,31 @@ pub fn pairing_connect(code: &str) -> Result<()> {
         handle.dial_peer(&payload.peer_id, &payload.addrs);
         Ok(())
     })
+}
+
+fn connect_short_code(code: &str) -> Result<()> {
+    let targets: Vec<(String, Vec<String>, String)> = handle_with(|handle| {
+        let state = handle.snapshot();
+        Ok(state
+            .peers
+            .into_values()
+            .filter(|peer| peer.code.eq_ignore_ascii_case(code))
+            .map(|peer| (peer.id, peer.addresses, peer.fingerprint))
+            .collect())
+    })?;
+
+    if targets.is_empty() {
+        return Err(DropleError::PairingNotFound);
+    }
+
+    for (peer_id, addrs, fingerprint) in &targets {
+        with_engine(|e| db::upsert_peer(&e.conn, peer_id, "", peer_id, fingerprint))?;
+        handle_with(|handle| {
+            handle.dial_peer(peer_id, addrs);
+            Ok(())
+        })?;
+    }
+    Ok(())
 }
 
 pub fn add_relay(addr: &str) -> Result<()> {

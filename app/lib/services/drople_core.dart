@@ -41,4 +41,7 @@ class DropleCore {
       _bindings.noteUpdate(id, title, content);
 
   void deleteNote(String id) => _bindings.noteDelete(id);
+
+  void setFavorite(String id, bool favorite) =>
+      _bindings.noteSetFavorite(id, favorite);
 }

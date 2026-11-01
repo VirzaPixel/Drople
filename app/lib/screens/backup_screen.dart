@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../models/backup_item.dart';
 import '../services/drople_backup.dart';
+import '../theme/app_theme.dart';
+import '../widgets/ui.dart';
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key});
@@ -235,183 +237,229 @@ class _BackupScreenState extends State<BackupScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: isError ? Colors.red : null,
+        backgroundColor: isError ? AppColors.danger : null,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Backup & Cloud'),
-        actions: [
-          IconButton(
-            tooltip: 'Muat ulang',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(12),
-              children: [
-                _buildRecoveryCard(),
-                const SizedBox(height: 12),
-                _buildDriveCard(),
-                const SizedBox(height: 16),
-                const Text(
-                  'Daftar Snapshot di Cloud',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                const SizedBox(height: 8),
-                if (_backups.isEmpty)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        _connected
-                            ? 'Belum ada snapshot backup di Google Drive.'
-                            : 'Hubungkan Google Drive untuk melihat snapshot cloud.',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                    ),
-                  )
-                else
-                  ..._backups.map(
-                    (b) => Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.cloud_done, color: Colors.green),
-                        title: Text(
-                          b.date.toLocal().toString().split('.').first,
-                        ),
-                        subtitle: Text('${b.sizeFormatted} • ${b.id}'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 900),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: () async => _refresh(),
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
+                      children: [
+                        Row(
                           children: [
-                            IconButton(
-                              tooltip: 'Restore',
-                              icon: const Icon(Icons.restore),
-                              onPressed: _busy ? null : () => _restore(b),
+                            const BrandMark(size: 44),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Backup', style: theme.textTheme.headlineMedium),
+                                  Text(
+                                    'Cadangan terenkripsi di Google Drive',
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
                             ),
                             IconButton(
-                              tooltip: 'Hapus',
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: _busy ? null : () => _delete(b),
+                              tooltip: 'Muat ulang',
+                              onPressed: _refresh,
+                              icon: const Icon(Icons.refresh_rounded),
                             ),
                           ],
                         ),
-                      ),
+                        const SizedBox(height: 18),
+                        _buildRecoveryCard(theme),
+                        const SizedBox(height: 14),
+                        _buildDriveCard(theme),
+                        const SizedBox(height: 24),
+                        SectionHeader(
+                          title: 'Snapshot Cloud',
+                          subtitle: _backups.isEmpty
+                              ? 'Belum ada cadangan tersimpan'
+                              : '${_backups.length} snapshot terenkripsi',
+                        ),
+                        if (_backups.isEmpty)
+                          EmptyState(
+                            icon: Icons.cloud_off_rounded,
+                            title: _connected
+                                ? 'Belum ada snapshot'
+                                : 'Google Drive belum terhubung',
+                            message: _connected
+                                ? 'Buat backup pertama. Snapshot dienkripsi sebelum diunggah.'
+                                : 'Hubungkan Google Drive lewat token OAuth untuk mulai mencadangkan.',
+                          )
+                        else
+                          ...List.generate(
+                            _backups.length,
+                            (i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: StaggeredEntry(
+                                index: i,
+                                child: _snapshotCard(theme, _backups[i]),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildRecoveryCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.key, size: 20, color: Colors.amber),
-                const SizedBox(width: 8),
-                const Text(
-                  'E2EE Recovery Key (12 Kata)',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const Spacer(),
-                IconButton(
-                  tooltip: 'Ubah / Pulihkan dari Kata',
-                  icon: const Icon(Icons.edit, size: 18),
-                  onPressed: _changeRecoveryKey,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.withAlpha(30),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SelectableText(
-                _recoveryKey ?? '-',
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () {
-                    if (_recoveryKey != null) {
-                      Clipboard.setData(ClipboardData(text: _recoveryKey!));
-                      _showSnack('Recovery key disalin ke clipboard');
-                    }
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Salin'),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Simpan kata-kata ini! Backup di cloud dienkripsi secara lokal.',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildDriveCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.cloud,
-                  color: _connected ? Colors.green : Colors.grey,
+  Widget _buildRecoveryCard(ThemeData theme) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.amber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  _connected
-                      ? 'Google Drive Terhubung'
-                      : 'Google Drive Belum Terhubung',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                child: const Icon(Icons.key_rounded, size: 20, color: AppColors.amber),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Recovery Key', style: theme.textTheme.titleMedium),
+                    Text('12 kata untuk membuka backup', style: theme.textTheme.labelSmall),
+                  ],
                 ),
-              ],
+              ),
+              IconButton(
+                tooltip: 'Ubah recovery key',
+                onPressed: _changeRecoveryKey,
+                icon: const Icon(Icons.edit_rounded, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: theme.colorScheme.outlineVariant),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Snapshot dienkripsi di perangkat (XChaCha20-Poly1305) sebelum diunggah ke appDataFolder Google Drive.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+            child: SelectableText(
+              _recoveryKey ?? '-',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontFamily: 'monospace',
+                height: 1.7,
+                letterSpacing: 0.3,
+              ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                if (_connected) ...[
-                  FilledButton.icon(
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: () {
+                  if (_recoveryKey != null) {
+                    Clipboard.setData(ClipboardData(text: _recoveryKey!));
+                    _showSnack('Recovery key disalin ke clipboard');
+                  }
+                },
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                label: const Text('Salin'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Simpan kata-kata ini. Tanpa kunci, backup tidak bisa dibuka.',
+                  style: theme.textTheme.labelSmall,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriveCard(ThemeData theme) {
+    final statusColor = _connected ? AppColors.leaf : theme.colorScheme.outline;
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.cloud_rounded, size: 20, color: statusColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Google Drive', style: theme.textTheme.titleMedium),
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _connected ? 'Terhubung' : 'Belum terhubung',
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (_connected)
+                TextButton(
+                  onPressed: () {
+                    _backup.disconnect();
+                    _showSnack('Google Drive diputuskan');
+                    _refresh();
+                  },
+                  child: const Text('Putuskan'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Snapshot dienkripsi di perangkat dengan XChaCha20-Poly1305 sebelum diunggah ke appDataFolder.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: _connected
+                ? FilledButton.icon(
                     onPressed: _busy ? null : _backupNow,
                     icon: _busy
                         ? const SizedBox(
@@ -419,29 +467,65 @@ class _BackupScreenState extends State<BackupScreen> {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.cloud_upload),
-                    label: const Text('Backup Sekarang'),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () {
-                      _backup.disconnect();
-                      _showSnack('Google Drive diputuskan');
-                      _refresh();
-                    },
-                    child: const Text('Putus'),
-                  ),
-                ] else ...[
-                  FilledButton.icon(
+                        : const Icon(Icons.cloud_upload_rounded, size: 18),
+                    label: Text(_busy ? 'Membuat backup…' : 'Backup Sekarang'),
+                  )
+                : FilledButton.icon(
                     onPressed: _enterTokenManually,
-                    icon: const Icon(Icons.login),
-                    label: const Text('Atur Token OAuth'),
+                    icon: const Icon(Icons.login_rounded, size: 18),
+                    label: const Text('Hubungkan Google Drive'),
                   ),
-                ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _snapshotCard(ThemeData theme, BackupItem item) {
+    final date = item.date.toLocal();
+    return AppCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppColors.leaf.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.inventory_2_rounded, size: 20, color: AppColors.leaf),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${date.day}/${date.month}/${date.year} · ${date.hour.toString().padLeft(2, '0')}.${date.minute.toString().padLeft(2, '0')}',
+                  style: theme.textTheme.titleMedium?.copyWith(fontSize: 14),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${item.sizeFormatted} · ${item.id}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall,
+                ),
               ],
             ),
-          ],
-        ),
+          ),
+          IconButton(
+            tooltip: 'Restore',
+            onPressed: _busy ? null : () => _restore(item),
+            icon: const Icon(Icons.restore_rounded, size: 20),
+          ),
+          IconButton(
+            tooltip: 'Hapus',
+            onPressed: _busy ? null : () => _delete(item),
+            icon: const Icon(Icons.delete_outline_rounded, size: 20),
+          ),
+        ],
       ),
     );
   }

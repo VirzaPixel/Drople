@@ -82,6 +82,7 @@ pub struct NoteSummary {
     pub updated_at: i64,
     pub is_favorite: i64,
     pub sync_status: String,
+    pub preview: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -188,6 +189,7 @@ fn map_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
         updated_at: row.get(2)?,
         is_favorite: row.get(3)?,
         sync_status: row.get(4)?,
+        preview: row.get(5)?,
     })
 }
 
@@ -243,6 +245,17 @@ pub fn update_note(conn: &Connection, id: &str, title: &str, content: &str) -> R
     Ok(())
 }
 
+pub fn set_note_favorite(conn: &Connection, id: &str, favorite: bool) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE notes SET is_favorite = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+        params![id, if favorite { 1 } else { 0 }],
+    )?;
+    if affected == 0 {
+        return Err(DropleError::NotFound);
+    }
+    Ok(())
+}
+
 pub fn delete_note(conn: &Connection, id: &str) -> Result<()> {
     let now = now_millis();
     let affected = conn.execute(
@@ -260,7 +273,8 @@ pub fn delete_note(conn: &Connection, id: &str) -> Result<()> {
 
 pub fn list_notes(conn: &Connection) -> Result<Vec<NoteSummary>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, updated_at, is_favorite, sync_status
+        "SELECT id, title, updated_at, is_favorite, sync_status,
+                substr(content, 1, 160)
          FROM notes WHERE deleted_at IS NULL
          ORDER BY is_favorite DESC, updated_at DESC",
     )?;
@@ -322,10 +336,10 @@ pub fn upsert_peer(
         "INSERT INTO peers (id, name, public_key, last_seen, paired_at, fingerprint)
          VALUES (?1, ?2, ?3, ?4, ?4, ?5)
          ON CONFLICT(id) DO UPDATE SET
-             name = excluded.name,
+             name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE peers.name END,
              public_key = excluded.public_key,
              last_seen = excluded.last_seen,
-             fingerprint = excluded.fingerprint",
+             fingerprint = CASE WHEN excluded.fingerprint <> '' THEN excluded.fingerprint ELSE peers.fingerprint END",
         params![id, name, public_key, now, fingerprint],
     )?;
     Ok(())
@@ -358,7 +372,8 @@ pub fn mark_note_synced(
 
 pub fn get_pending_notes(conn: &Connection) -> Result<Vec<NoteSummary>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, updated_at, is_favorite, sync_status
+        "SELECT id, title, updated_at, is_favorite, sync_status,
+                substr(content, 1, 160)
          FROM notes WHERE sync_status != 'synced'
          ORDER BY updated_at ASC",
     )?;

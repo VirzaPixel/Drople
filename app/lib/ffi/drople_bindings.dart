@@ -115,6 +115,9 @@ typedef _TwoStringDart = int Function(
   ffi.Pointer<Utf8>,
 );
 
+typedef _FavoriteNative = ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
+typedef _FavoriteDart = int Function(ffi.Pointer<Utf8>, int);
+
 /// Low-level FFI bindings ke `drople_core`.
 class DropleBindings {
   DropleBindings._(this._lib);
@@ -314,6 +317,20 @@ class DropleBindings {
 
   String noteListJson() => _stringOut('drople_note_list');
 
+  void noteSetFavorite(String id, bool favorite) {
+    final i = id.toNativeUtf8();
+    try {
+      final rc = _lib
+          .lookupFunction<_FavoriteNative, _FavoriteDart>(
+              'drople_note_set_favorite')(i, favorite ? 1 : 0);
+      if (rc != 0) {
+        throw StateError('drople_note_set_favorite gagal (kode $rc)');
+      }
+    } finally {
+      malloc.free(i);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Sync
   // -------------------------------------------------------------------------
@@ -373,6 +390,11 @@ class DropleBindings {
   // -------------------------------------------------------------------------
   // Network
   // -------------------------------------------------------------------------
+
+  void setDeviceName(String name) =>
+      _callWithString('drople_set_device_name', name);
+
+  String localShortCode() => _stringOut('drople_local_short_code');
 
   int networkStart() =>
       _lib.lookupFunction<_NoArgNative, _NoArgDart>('drople_network_start')();
@@ -445,6 +467,9 @@ class DropleBindings {
       malloc.free(s);
     }
   }
+
+  void fileSetReceiveDir(String path) =>
+      _callWithString('drople_file_set_receive_dir', path);
 
   String fileListJson() => _stringOut('drople_file_list');
 
