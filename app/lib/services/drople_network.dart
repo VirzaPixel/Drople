@@ -55,11 +55,15 @@ class DropleNetwork {
       }
       if (Platform.isMacOS) {
         final mac = await info.macOsInfo;
-        return mac.computerName.trim().isEmpty ? 'Mac' : mac.computerName.trim();
+        return mac.computerName.trim().isEmpty
+            ? 'Mac'
+            : mac.computerName.trim();
       }
       if (Platform.isWindows) {
         final win = await info.windowsInfo;
-        return win.computerName.trim().isEmpty ? 'Windows' : win.computerName.trim();
+        return win.computerName.trim().isEmpty
+            ? 'Windows'
+            : win.computerName.trim();
       }
       if (Platform.isLinux) {
         final linux = await info.linuxInfo;
@@ -98,6 +102,21 @@ class DropleNetwork {
   Future<void> connectPairing(String code) async {
     _bindings.pairingConnect(code);
   }
+
+  List<({String id, String name})> pendingApprovals() {
+    final data = jsonDecode(_bindings.pendingApprovalsJson()) as List<dynamic>;
+    return data.map((item) {
+      final request = item as Map<String, dynamic>;
+      return (
+        id: request['id'] as String,
+        name: request['name'] as String? ?? '',
+      );
+    }).toList();
+  }
+
+  void approvePairing(String peerId) => _bindings.approvePairing(peerId);
+
+  void rejectPairing(String peerId) => _bindings.rejectPairing(peerId);
 
   Future<void> addRelay(String addr) async {
     _bindings.addRelay(addr);

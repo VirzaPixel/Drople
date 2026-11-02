@@ -12,38 +12,36 @@ typedef _VoidDart = void Function();
 typedef _FreeNative = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef _FreeDart = void Function(ffi.Pointer<Utf8>);
 
-typedef _CreateNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
-typedef _CreateDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
+typedef _CreateNative =
+    ffi.Int32 Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+    );
+typedef _CreateDart =
+    int Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+    );
 
-typedef _GetNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
-typedef _GetDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
+typedef _GetNative =
+    ffi.Int32 Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+    );
+typedef _GetDart =
+    int Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+    );
 
-typedef _UpdateNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-);
-typedef _UpdateDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-);
+typedef _UpdateNative =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef _UpdateDart =
+    int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef _DeleteNative = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _DeleteDart = int Function(ffi.Pointer<Utf8>);
@@ -57,63 +55,43 @@ typedef _NoArgDart = int Function();
 typedef _CodeNative = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _CodeDart = int Function(ffi.Pointer<Utf8>);
 
-typedef _SyncStatusNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
-typedef _SyncStatusDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
+typedef _SyncStatusNative =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<ffi.Pointer<Utf8>>);
+typedef _SyncStatusDart =
+    int Function(ffi.Pointer<Utf8>, ffi.Pointer<ffi.Pointer<Utf8>>);
 
-typedef _ApplyDeltaNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-);
+typedef _ApplyDeltaNative =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 typedef _ApplyDeltaDart = int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
-typedef _FileSendNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
-typedef _FileSendDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
+typedef _FileSendNative =
+    ffi.Int32 Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+    );
+typedef _FileSendDart =
+    int Function(
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<Utf8>,
+      ffi.Pointer<ffi.Pointer<Utf8>>,
+    );
 
-typedef _FileStatusNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
-typedef _FileStatusDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<ffi.Pointer<Utf8>>,
-);
+typedef _FileStatusNative =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<ffi.Pointer<Utf8>>);
+typedef _FileStatusDart =
+    int Function(ffi.Pointer<Utf8>, ffi.Pointer<ffi.Pointer<Utf8>>);
 
-typedef _SetTokenNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  ffi.Int64,
-);
-typedef _SetTokenDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-  int,
-);
+typedef _SetTokenNative =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Int64);
+typedef _SetTokenDart = int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, int);
 
 typedef _BoolOutNative = ffi.Int32 Function(ffi.Pointer<ffi.Int32>);
 typedef _BoolOutDart = int Function(ffi.Pointer<ffi.Int32>);
 
-typedef _TwoStringNative = ffi.Int32 Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-);
-typedef _TwoStringDart = int Function(
-  ffi.Pointer<Utf8>,
-  ffi.Pointer<Utf8>,
-);
+typedef _TwoStringNative =
+    ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
+typedef _TwoStringDart = int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>);
 
 typedef _FavoriteNative = ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Int32);
 typedef _FavoriteDart = int Function(ffi.Pointer<Utf8>, int);
@@ -234,12 +212,9 @@ class DropleBindings {
     final c = content.toNativeUtf8();
     final out = malloc<ffi.Pointer<Utf8>>();
     try {
-      final rc =
-          _lib.lookupFunction<_CreateNative, _CreateDart>('drople_note_create')(
-        t,
-        c,
-        out,
-      );
+      final rc = _lib.lookupFunction<_CreateNative, _CreateDart>(
+        'drople_note_create',
+      )(t, c, out);
       if (rc != 0) {
         throw StateError('drople_note_create gagal (kode $rc)');
       }
@@ -259,8 +234,7 @@ class DropleBindings {
     final outTitle = malloc<ffi.Pointer<Utf8>>();
     final outContent = malloc<ffi.Pointer<Utf8>>();
     try {
-      final rc =
-          _lib.lookupFunction<_GetNative, _GetDart>('drople_note_get')(
+      final rc = _lib.lookupFunction<_GetNative, _GetDart>('drople_note_get')(
         idPtr,
         outTitle,
         outContent,
@@ -285,12 +259,9 @@ class DropleBindings {
     final t = title.toNativeUtf8();
     final c = content.toNativeUtf8();
     try {
-      final rc =
-          _lib.lookupFunction<_UpdateNative, _UpdateDart>('drople_note_update')(
-        i,
-        t,
-        c,
-      );
+      final rc = _lib.lookupFunction<_UpdateNative, _UpdateDart>(
+        'drople_note_update',
+      )(i, t, c);
       if (rc != 0) {
         throw StateError('drople_note_update gagal (kode $rc)');
       }
@@ -320,9 +291,9 @@ class DropleBindings {
   void noteSetFavorite(String id, bool favorite) {
     final i = id.toNativeUtf8();
     try {
-      final rc = _lib
-          .lookupFunction<_FavoriteNative, _FavoriteDart>(
-              'drople_note_set_favorite')(i, favorite ? 1 : 0);
+      final rc = _lib.lookupFunction<_FavoriteNative, _FavoriteDart>(
+        'drople_note_set_favorite',
+      )(i, favorite ? 1 : 0);
       if (rc != 0) {
         throw StateError('drople_note_set_favorite gagal (kode $rc)');
       }
@@ -340,9 +311,9 @@ class DropleBindings {
     try {
       final out = malloc<ffi.Pointer<Utf8>>();
       try {
-        final rc = _lib
-            .lookupFunction<_SyncStatusNative, _SyncStatusDart>(
-                'drople_note_sync_status')(p, out);
+        final rc = _lib.lookupFunction<_SyncStatusNative, _SyncStatusDart>(
+          'drople_note_sync_status',
+        )(p, out);
         if (rc != 0) {
           throw StateError('drople_note_sync_status gagal (kode $rc)');
         }
@@ -363,9 +334,9 @@ class DropleBindings {
     final d = deltaJson.toNativeUtf8();
     final p = localPeerId.toNativeUtf8();
     try {
-      final rc = _lib
-          .lookupFunction<_ApplyDeltaNative, _ApplyDeltaDart>(
-              'drople_note_apply_delta')(d, p);
+      final rc = _lib.lookupFunction<_ApplyDeltaNative, _ApplyDeltaDart>(
+        'drople_note_apply_delta',
+      )(d, p);
       if (rc != 0) {
         throw StateError('drople_note_apply_delta gagal (kode $rc)');
       }
@@ -408,6 +379,14 @@ class DropleBindings {
 
   String peersListJson() => _stringOut('drople_peers_list');
 
+  String pendingApprovalsJson() => _stringOut('drople_pending_approvals');
+
+  void approvePairing(String peerId) =>
+      _callWithString('drople_pairing_approve', peerId);
+
+  void rejectPairing(String peerId) =>
+      _callWithString('drople_pairing_reject', peerId);
+
   String pairingStart() => _stringOut('drople_pairing_start');
 
   void pairingConnect(String code) =>
@@ -425,12 +404,9 @@ class DropleBindings {
     final f = filePath.toNativeUtf8();
     final out = malloc<ffi.Pointer<Utf8>>();
     try {
-      final rc = _lib
-          .lookupFunction<_FileSendNative, _FileSendDart>('drople_file_send')(
-        p,
-        f,
-        out,
-      );
+      final rc = _lib.lookupFunction<_FileSendNative, _FileSendDart>(
+        'drople_file_send',
+      )(p, f, out);
       if (rc != 0) {
         throw StateError('drople_file_send gagal (kode $rc)');
       }
@@ -449,12 +425,9 @@ class DropleBindings {
     final s = savePath.toNativeUtf8();
     final out = malloc<ffi.Pointer<Utf8>>();
     try {
-      final rc = _lib
-          .lookupFunction<_FileSendNative, _FileSendDart>('drople_file_receive')(
-        p,
-        s,
-        out,
-      );
+      final rc = _lib.lookupFunction<_FileSendNative, _FileSendDart>(
+        'drople_file_receive',
+      )(p, s, out);
       if (rc != 0) {
         throw StateError('drople_file_receive gagal (kode $rc)');
       }
@@ -477,9 +450,9 @@ class DropleBindings {
     final p = id.toNativeUtf8();
     final out = malloc<ffi.Pointer<Utf8>>();
     try {
-      final rc = _lib
-          .lookupFunction<_FileStatusNative, _FileStatusDart>(
-              'drople_file_transfer_status')(p, out);
+      final rc = _lib.lookupFunction<_FileStatusNative, _FileStatusDart>(
+        'drople_file_transfer_status',
+      )(p, out);
       if (rc != 0) {
         throw StateError('drople_file_transfer_status gagal (kode $rc)');
       }
@@ -500,9 +473,9 @@ class DropleBindings {
     final a = accessToken.toNativeUtf8();
     final r = refreshToken.toNativeUtf8();
     try {
-      final rc = _lib
-          .lookupFunction<_SetTokenNative, _SetTokenDart>(
-              'drople_gdrive_set_token')(a, r, expiresAt);
+      final rc = _lib.lookupFunction<_SetTokenNative, _SetTokenDart>(
+        'drople_gdrive_set_token',
+      )(a, r, expiresAt);
       if (rc != 0) {
         throw StateError('drople_gdrive_set_token gagal (kode $rc)');
       }
@@ -516,9 +489,9 @@ class DropleBindings {
     final c = clientId.toNativeUtf8();
     final s = clientSecret.toNativeUtf8();
     try {
-      final rc = _lib
-          .lookupFunction<_TwoStringNative, _TwoStringDart>(
-              'drople_gdrive_set_client')(c, s);
+      final rc = _lib.lookupFunction<_TwoStringNative, _TwoStringDart>(
+        'drople_gdrive_set_client',
+      )(c, s);
       if (rc != 0) {
         throw StateError('drople_gdrive_set_client gagal (kode $rc)');
       }
@@ -530,21 +503,16 @@ class DropleBindings {
 
   String gdriveClientId() => _stringOut('drople_gdrive_client_id');
 
-  bool gdriveHasClientSecret() =>
-      _boolOut('drople_gdrive_has_client_secret');
+  bool gdriveHasClientSecret() => _boolOut('drople_gdrive_has_client_secret');
 
-  void gdriveExchangeCode(
-    String code,
-    String verifier,
-    String redirectUri,
-  ) {
+  void gdriveExchangeCode(String code, String verifier, String redirectUri) {
     final c = code.toNativeUtf8();
     final v = verifier.toNativeUtf8();
     final r = redirectUri.toNativeUtf8();
     try {
-      final rc = _lib
-          .lookupFunction<_UpdateNative, _UpdateDart>(
-              'drople_gdrive_exchange_code')(c, v, r);
+      final rc = _lib.lookupFunction<_UpdateNative, _UpdateDart>(
+        'drople_gdrive_exchange_code',
+      )(c, v, r);
       if (rc != 0) {
         throw StateError('drople_gdrive_exchange_code gagal (kode $rc)');
       }

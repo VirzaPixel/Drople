@@ -93,6 +93,43 @@ pub fn peers_json() -> Result<String> {
     Ok(serde_json::to_string(&peers)?)
 }
 
+pub fn pending_approvals_json() -> Result<String> {
+    let guard = lock()?;
+    let requests = match guard.as_ref() {
+        Some(handle) => {
+            let state = handle.snapshot();
+            state
+                .pending_approvals
+                .into_keys()
+                .map(|id| {
+                    let name = state
+                        .peers
+                        .get(&id)
+                        .map(|peer| peer.name.clone())
+                        .unwrap_or_default();
+                    serde_json::json!({"id": id, "name": name})
+                })
+                .collect::<Vec<_>>()
+        }
+        None => Vec::new(),
+    };
+    Ok(serde_json::to_string(&requests)?)
+}
+
+pub fn approve_peer(peer_id: &str) -> Result<()> {
+    handle_with(|handle| {
+        handle.approve_peer(peer_id);
+        Ok(())
+    })
+}
+
+pub fn reject_peer(peer_id: &str) -> Result<()> {
+    handle_with(|handle| {
+        handle.reject_peer(peer_id);
+        Ok(())
+    })
+}
+
 /// Mengembalikan kode pairing pendek 6 karakter untuk perangkat ini.
 pub fn pairing_start() -> Result<String> {
     local_short_code()
@@ -118,7 +155,7 @@ pub fn pairing_connect(code: &str) -> Result<()> {
         )
     })?;
     handle_with(|handle| {
-        handle.dial_peer(&payload.peer_id, &payload.addrs);
+        handle.request_pairing(&payload.peer_id, &payload.addrs);
         Ok(())
     })
 }
@@ -141,7 +178,7 @@ fn connect_short_code(code: &str) -> Result<()> {
     for (peer_id, addrs, fingerprint) in &targets {
         with_engine(|e| db::upsert_peer(&e.conn, peer_id, "", peer_id, fingerprint))?;
         handle_with(|handle| {
-            handle.dial_peer(peer_id, addrs);
+            handle.request_pairing(peer_id, addrs);
             Ok(())
         })?;
     }

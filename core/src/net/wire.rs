@@ -5,6 +5,7 @@ use crate::sync::protocol::NoteDelta;
 /// Pesan aplikasi yang dipertukarkan antar-peer melalui protokol `/drople/wire/1`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WireMessage {
+    PairingRequest,
     Sync {
         deltas: Vec<NoteDelta>,
     },

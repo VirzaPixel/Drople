@@ -274,6 +274,32 @@ pub extern "C" fn drople_peers_list(out_json: *mut *mut c_char) -> c_int {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn drople_pending_approvals(out_json: *mut *mut c_char) -> c_int {
+    run(|| {
+        let json = crate::net::pending_approvals_json()?;
+        write_out(out_json, json)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_pairing_approve(peer_id: *const c_char) -> c_int {
+    let peer_id = match cstr_to_string(peer_id) {
+        Ok(value) => value,
+        Err(error) => return error.code(),
+    };
+    run(|| crate::net::approve_peer(&peer_id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_pairing_reject(peer_id: *const c_char) -> c_int {
+    let peer_id = match cstr_to_string(peer_id) {
+        Ok(value) => value,
+        Err(error) => return error.code(),
+    };
+    run(|| crate::net::reject_peer(&peer_id))
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn drople_pairing_start(out_code: *mut *mut c_char) -> c_int {
     run(|| {
         let code = crate::net::pairing_start()?;

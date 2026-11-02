@@ -55,6 +55,8 @@ pub struct SharedState {
     pub local_code: String,
     pub listen_addrs: Vec<String>,
     pub peers: BTreeMap<String, PeerEntry>,
+    pub pending_approvals: BTreeMap<String, String>,
+    pub rejected_peers: std::collections::HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -73,6 +75,12 @@ enum NetworkCommand {
         transfer_id: String,
         file_path: String,
     },
+    RequestPairing {
+        peer_id: String,
+        addrs: Vec<String>,
+    },
+    ApprovePeer(String),
+    RejectPeer(String),
     Shutdown,
 }
 
@@ -123,6 +131,7 @@ struct WireState {
     outbound: HashMap<String, OutboundTransfer>,
     pending: HashMap<request_response::OutboundRequestId, PendingAction>,
     incoming: HashMap<String, IncomingTransfer>,
+    pairing_outbound: std::collections::HashSet<PeerId>,
 }
 
 pub struct NodeHandle {
@@ -181,6 +190,25 @@ impl NodeHandle {
             transfer_id: transfer_id.to_string(),
             file_path: file_path.to_string(),
         });
+    }
+
+    pub fn approve_peer(&self, peer_id: &str) {
+        let _ = self
+            .cmd_tx
+            .send_blocking(NetworkCommand::ApprovePeer(peer_id.to_string()));
+    }
+
+    pub fn request_pairing(&self, peer_id: &str, addrs: &[String]) {
+        let _ = self.cmd_tx.send_blocking(NetworkCommand::RequestPairing {
+            peer_id: peer_id.to_string(),
+            addrs: addrs.to_vec(),
+        });
+    }
+
+    pub fn reject_peer(&self, peer_id: &str) {
+        let _ = self
+            .cmd_tx
+            .send_blocking(NetworkCommand::RejectPeer(peer_id.to_string()));
     }
 
     pub fn stop(self) {
@@ -317,6 +345,34 @@ async fn run(
                             &transfer_id,
                             &file_path,
                         );
+                    }
+                    Ok(NetworkCommand::RequestPairing { peer_id, addrs }) => {
+                        if let Ok(peer) = peer_id.parse::<PeerId>() {
+                            if let Ok(mut state) = shared.lock() {
+                                state.rejected_peers.remove(&peer_id);
+                            }
+                            if swarm.is_connected(&peer) {
+                                let _ = swarm.behaviour_mut().wire.send_request(&peer, WireMessage::PairingRequest);
+                            } else {
+                                wire.pairing_outbound.insert(peer);
+                                dial_peer(&mut swarm, &peer_id, &addrs, relay_addr.as_ref());
+                            }
+                        }
+                    }
+                    Ok(NetworkCommand::ApprovePeer(peer_id)) => {
+                        if let Ok(mut state) = shared.lock() {
+                            state.pending_approvals.remove(&peer_id);
+                            state.rejected_peers.remove(&peer_id);
+                        }
+                    }
+                    Ok(NetworkCommand::RejectPeer(peer_id)) => {
+                        if let Ok(mut state) = shared.lock() {
+                            state.pending_approvals.remove(&peer_id);
+                            state.rejected_peers.insert(peer_id.clone());
+                        }
+                        if let Ok(peer) = peer_id.parse::<PeerId>() {
+                            let _ = swarm.disconnect_peer_id(peer);
+                        }
                     }
                     Ok(NetworkCommand::Shutdown) | Err(_) => break,
                 }
@@ -478,6 +534,12 @@ fn handle_swarm_event(
         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
             set_connected(shared, db_conn, &peer_id, true);
             upsert_peer(shared, db_conn, &peer_id, None, &[], Some(true), None, None);
+            if wire.pairing_outbound.remove(&peer_id) {
+                let _ = swarm
+                    .behaviour_mut()
+                    .wire
+                    .send_request(&peer_id, WireMessage::PairingRequest);
+            }
             resume_peer_transfers(swarm, wire, db_conn, &peer_id);
         }
         SwarmEvent::ConnectionClosed {
@@ -862,11 +924,19 @@ fn handle_wire_response(
 fn handle_incoming_request(
     request: WireMessage,
     peer: &PeerId,
-    _shared: &Arc<Mutex<SharedState>>,
+    shared: &Arc<Mutex<SharedState>>,
     db_conn: &Option<Connection>,
     wire: &mut WireState,
 ) -> WireMessage {
     match request {
+        WireMessage::PairingRequest => {
+            let id = peer.to_string();
+            if let Ok(mut state) = shared.lock() {
+                state.pending_approvals.insert(id.clone(), id.clone());
+                state.rejected_peers.remove(&id);
+            }
+            WireMessage::ack("permintaan koneksi diterima")
+        }
         WireMessage::Sync { .. } => {
             WireMessage::nack("sinkronisasi catatan antar perangkat dinonaktifkan".to_string())
         }
@@ -876,6 +946,16 @@ fn handle_incoming_request(
             file_size,
             file_hash,
         } => {
+            let blocked = shared
+                .lock()
+                .map(|state| {
+                    state.pending_approvals.contains_key(&peer.to_string())
+                        || state.rejected_peers.contains(&peer.to_string())
+                })
+                .unwrap_or(false);
+            if blocked {
+                return WireMessage::nack("koneksi belum diizinkan");
+            }
             if wire.incoming.contains_key(&transfer_id) {
                 return WireMessage::ack("sudah diterima");
             }

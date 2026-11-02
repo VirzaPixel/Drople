@@ -14,6 +14,7 @@ import '../services/drople_network.dart';
 import '../theme/app_theme.dart';
 import '../widgets/qr_scanner_screen.dart';
 import '../widgets/ui.dart';
+import 'my_file_gua_screen.dart';
 
 IconData _peerIconFor(PeerEntry peer) {
   final platform = peer.platform.toLowerCase();
@@ -102,6 +103,7 @@ class _PeersScreenState extends State<PeersScreen> {
   String _lastSignature = '';
   bool _connecting = false;
   bool _codeOpen = false;
+  final Set<String> _approvalDialogs = {};
 
   @override
   void initState() {
@@ -116,6 +118,8 @@ class _PeersScreenState extends State<PeersScreen> {
       final code = widget.network.localShortCode();
       final signature =
           '$code|${peers.map((p) => '${p.id}:${p.connected}:${p.name}:${p.code}:${p.lastSeen}').join(',')}';
+      if (!mounted) return;
+      _checkPairingRequests();
       if (silent && signature == _lastSignature) return;
       _lastSignature = signature;
       if (!mounted) return;
@@ -124,6 +128,55 @@ class _PeersScreenState extends State<PeersScreen> {
         if (code.isNotEmpty) _code = code;
       });
     } catch (_) {}
+  }
+
+  void _checkPairingRequests() {
+    try {
+      for (final request in widget.network.pendingApprovals()) {
+        if (_approvalDialogs.add(request.id)) {
+          _showPairingRequest(request.id, request.name);
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _showPairingRequest(String peerId, String name) async {
+    final l = context.l10n;
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.devices_rounded),
+        title: Text(l.t('peers.pairRequestTitle')),
+        content: Text(
+          l.t('peers.pairRequestMessage', {
+            'device': name.trim().isEmpty ? peerId : name,
+          }),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l.t('peers.pairReject')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l.t('peers.pairAccept')),
+          ),
+        ],
+      ),
+    );
+    try {
+      if (accepted == true) {
+        widget.network.approvePairing(peerId);
+      } else {
+        widget.network.rejectPairing(peerId);
+      }
+    } catch (_) {}
+    _approvalDialogs.remove(peerId);
+    _load(silent: false);
   }
 
   List<String> _codeChars() {
@@ -370,6 +423,8 @@ class _PeersScreenState extends State<PeersScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 children: [
+                  _archiveCard(theme),
+                  const SizedBox(height: 18),
                   SectionHeader(
                     title: l.t('nav.devices'),
                     subtitle: l.t('peers.subtitle', {
@@ -409,6 +464,58 @@ class _PeersScreenState extends State<PeersScreen> {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _archiveCard(ThemeData theme) {
+    final l = context.l10n;
+    return Material(
+      color: AppColors.primary.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const MyFileGuaScreen()),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              _IconTile(icon: Icons.inventory_2_outlined),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l.t('peers.archiveTitle'),
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      l.t('peers.archiveSubtitle'),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const MyFileGuaScreen(),
+                  ),
+                ),
+                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                label: Text(l.t('peers.archiveOpen')),
+              ),
+            ],
           ),
         ),
       ),
