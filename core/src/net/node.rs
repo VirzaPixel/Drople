@@ -588,7 +588,9 @@ fn handle_swarm_event(
         }
         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
             if let Some(peer_id) = peer_id {
-                set_connected(shared, db_conn, &peer_id, false);
+                if !swarm.is_connected(&peer_id) {
+                    set_connected(shared, db_conn, &peer_id, false);
+                }
             }
             let _ = error;
         }
@@ -616,7 +618,9 @@ fn handle_swarm_event(
             }
             mdns::Event::Expired(list) => {
                 for (peer_id, _) in list {
-                    set_connected(shared, db_conn, &peer_id, false);
+                    if !swarm.is_connected(&peer_id) {
+                        set_connected(shared, db_conn, &peer_id, false);
+                    }
                 }
             }
         },

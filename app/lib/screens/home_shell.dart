@@ -31,6 +31,8 @@ class _HomeShellState extends State<HomeShell> {
   bool _ready = false;
   String? _error;
   bool _networkWarning = false;
+  DateTime _splashStartedAt = DateTime.now();
+  static const _minimumSplashDuration = Duration(milliseconds: 1150);
 
   static const _destinations = [
     _Destination('nav.devices', Icons.radar_outlined, Icons.radar_rounded),
@@ -70,15 +72,23 @@ class _HomeShellState extends State<HomeShell> {
         _networkWarning = true;
       }
 
+      await _holdSplashVisible();
       if (!mounted) return;
       setState(() => _ready = true);
     } catch (e) {
+      await _holdSplashVisible();
       if (!mounted) return;
       setState(() {
         _error = '$e';
         _ready = true;
       });
     }
+  }
+
+  Future<void> _holdSplashVisible() async {
+    final remaining = _minimumSplashDuration -
+        DateTime.now().difference(_splashStartedAt);
+    if (remaining > Duration.zero) await Future<void>.delayed(remaining);
   }
 
   Future<void> _selectDestination(int index) async {
@@ -127,6 +137,7 @@ class _HomeShellState extends State<HomeShell> {
               setState(() {
                 _error = null;
                 _ready = false;
+                _splashStartedAt = DateTime.now();
               });
               _bootstrap();
             },
@@ -239,23 +250,38 @@ class _Splash extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const BrandMark(size: 78),
-          const SizedBox(height: 22),
-          Text('Drople', style: theme.textTheme.headlineLarge),
-          const SizedBox(height: 6),
-          Text(
-            context.l10n.t('home.preparing'),
-            style: theme.textTheme.bodySmall,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 720),
+        curve: Curves.easeOutCubic,
+        builder: (context, progress, child) => Opacity(
+          opacity: progress,
+          child: Transform.translate(
+            offset: Offset(0, 12 * (1 - progress)),
+            child: Transform.scale(
+              scale: 0.94 + (0.06 * progress),
+              child: child,
+            ),
           ),
-          const SizedBox(height: 26),
-          const SizedBox(
-            width: 120,
-            child: LinearProgressIndicator(minHeight: 3),
-          ),
-        ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const BrandMark(size: 78),
+            const SizedBox(height: 22),
+            Text('Drople', style: theme.textTheme.headlineLarge),
+            const SizedBox(height: 6),
+            Text(
+              context.l10n.t('home.preparing'),
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 26),
+            const SizedBox(
+              width: 120,
+              child: LinearProgressIndicator(minHeight: 3),
+            ),
+          ],
+        ),
       ),
     );
   }

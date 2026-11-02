@@ -33,7 +33,7 @@ class _FilesScreenState extends State<FilesScreen> {
   Timer? _storageTicker;
   ({int free, int total})? _storage;
   double _lanSpeed = 0;
-  int _lastProgressBytes = 0;
+  final Map<String, int> _lastTransferProgress = {};
   DateTime _lastSpeedAt = DateTime.now();
   String _lastSignature = '';
   final TextEditingController _search = TextEditingController();
@@ -59,25 +59,32 @@ class _FilesScreenState extends State<FilesScreen> {
   void _load({bool silent = true}) {
     try {
       final transfers = widget.files.listTransfers();
-      final progressBytes = transfers.fold<int>(
-        0,
-        (sum, t) => sum + (t.isActive ? t.progress : 0),
-      );
       final now = DateTime.now();
       final elapsed = now.difference(_lastSpeedAt).inMilliseconds;
-      if (elapsed > 0) {
-        final delta = progressBytes - _lastProgressBytes;
-        _lanSpeed = delta > 0 ? delta * 1000 / elapsed : 0;
-        _lastProgressBytes = progressBytes;
-        _lastSpeedAt = now;
+      var deltaBytes = 0;
+      final currentProgress = <String, int>{};
+      for (final transfer in transfers.where((item) => item.isActive)) {
+        currentProgress[transfer.id] = transfer.progress;
+        final previous = _lastTransferProgress[transfer.id];
+        if (previous != null && transfer.progress >= previous) {
+          deltaBytes += transfer.progress - previous;
+        }
       }
+      _lastTransferProgress
+        ..clear()
+        ..addAll(currentProgress);
+      final speed = elapsed > 0 ? deltaBytes * 1000 / elapsed : 0.0;
+      _lastSpeedAt = now;
       final signature = transfers
           .map((t) => '${t.id}:${t.status}:${t.progress}:${t.completedAt}')
           .join('|');
-      if (silent && signature == _lastSignature) return;
+      if (silent && signature == _lastSignature && speed == _lanSpeed) return;
       _lastSignature = signature;
       if (!mounted) return;
-      setState(() => _transfers = transfers);
+      setState(() {
+        _transfers = transfers;
+        _lanSpeed = speed;
+      });
     } catch (_) {}
   }
 
@@ -125,17 +132,8 @@ class _FilesScreenState extends State<FilesScreen> {
       context,
     ).push<String>(MaterialPageRoute(builder: (_) => const QrScannerScreen()));
     if (scanned == null || scanned.trim().isEmpty) return;
-    final raw = scanned.trim();
-    final code =
-        (raw.toUpperCase().startsWith('DRO1:') ? raw.substring(5) : raw)
-            .replaceAll(RegExp(r'[\s-]'), '')
-            .toUpperCase();
-    if (code.length < 4) {
-      _toast(l.t('files.invalidCode'));
-      return;
-    }
     try {
-      await widget.network.connectPairing(code);
+      await widget.network.connectPairing(scanned.trim());
       _toast(l.t('files.pairSent'));
     } catch (_) {
       _toast(l.t('files.connectFailed'));
@@ -369,15 +367,38 @@ class _FilesScreenState extends State<FilesScreen> {
         .where((t) => !t.isSend && t.isCompleted)
         .length;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: _speedCard(theme)),
-        const SizedBox(width: 8),
-        Expanded(child: _receivedCard(theme, received, receivedFiles)),
-        const SizedBox(width: 8),
-        Expanded(child: _storageCard(theme, storage, used, percent)),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final speedCard = _speedCard(theme);
+        final receivedCard = _receivedCard(theme, received, receivedFiles);
+        final storageCard = _storageCard(theme, storage, used, percent);
+        if (constraints.maxWidth < 520) {
+          return Column(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: speedCard),
+                  const SizedBox(width: 8),
+                  Expanded(child: receivedCard),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(width: double.infinity, child: storageCard),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: speedCard),
+            const SizedBox(width: 8),
+            Expanded(child: receivedCard),
+            const SizedBox(width: 8),
+            Expanded(child: storageCard),
+          ],
+        );
+      },
     );
   }
 

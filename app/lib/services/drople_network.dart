@@ -100,7 +100,24 @@ class DropleNetwork {
   Future<String> startPairing() async => _bindings.pairingStart();
 
   Future<void> connectPairing(String code) async {
-    _bindings.pairingConnect(code);
+    final trimmed = code.trim();
+    final shortCode = (trimmed.toUpperCase().startsWith('DRO1:')
+            ? trimmed.substring(5)
+            : trimmed)
+        .replaceAll(RegExp(r'[\s-]'), '');
+    final shouldWaitForDiscovery = shortCode.length <= 10;
+    final deadline = DateTime.now().add(const Duration(seconds: 12));
+    while (true) {
+      try {
+        _bindings.pairingConnect(trimmed);
+        return;
+      } on StateError catch (error) {
+        final waitingForPeer =
+            shouldWaitForDiscovery && error.message.contains('kode 16');
+        if (!waitingForPeer || !DateTime.now().isBefore(deadline)) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    }
   }
 
   List<({String id, String name})> pendingApprovals() {

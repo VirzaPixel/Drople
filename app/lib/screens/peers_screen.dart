@@ -303,21 +303,7 @@ class _PeersScreenState extends State<PeersScreen> {
     }
     setState(() => _connecting = true);
     try {
-      var attempt = 0;
-      while (true) {
-        try {
-          await widget.network.connectPairing(code);
-          break;
-        } on StateError catch (e) {
-          final notFound = e.message.contains('kode 16');
-          if (notFound && attempt < 4) {
-            attempt++;
-            await Future<void>.delayed(const Duration(milliseconds: 650));
-            continue;
-          }
-          rethrow;
-        }
-      }
+      await widget.network.connectPairing(code);
       _toast(l.t('peers.toastSent'));
       _load(silent: false);
     } on StateError catch (e) {
