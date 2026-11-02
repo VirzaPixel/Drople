@@ -21,6 +21,11 @@ class MyFileGua {
     return File('${directory.path}${Platform.pathSeparator}.messages.json');
   }
 
+  static Future<File> _fileViewState() async {
+    final directory = await _directory();
+    return File('${directory.path}${Platform.pathSeparator}.file_view.json');
+  }
+
   static Future<List<File>> listFiles() async {
     final directory = await _directory();
     final files = directory
@@ -30,6 +35,37 @@ class MyFileGua {
         .toList();
     files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
     return files;
+  }
+
+  static Future<int> unseenFileCount() async {
+    final stateFile = await _fileViewState();
+    var lastViewed = 0;
+    if (await stateFile.exists()) {
+      try {
+        final state =
+            jsonDecode(await stateFile.readAsString()) as Map<String, dynamic>;
+        lastViewed = (state['last_viewed'] as num?)?.toInt() ?? 0;
+      } catch (_) {}
+    }
+    final files = await listFiles();
+    final fileNames = files.map((file) => file.uri.pathSegments.last).toSet();
+    final messages = await listMessages();
+    return messages
+        .where(
+          (message) =>
+              message.attachmentName != null &&
+              message.createdAt > lastViewed &&
+              fileNames.contains(message.attachmentName),
+        )
+        .length;
+  }
+
+  static Future<void> markFilesViewed() async {
+    final stateFile = await _fileViewState();
+    await stateFile.writeAsString(
+      jsonEncode({'last_viewed': DateTime.now().millisecondsSinceEpoch}),
+      flush: true,
+    );
   }
 
   static Future<List<File>> addFiles(List<PlatformFile> picked) async {

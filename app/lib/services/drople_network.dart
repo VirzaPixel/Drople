@@ -118,6 +118,20 @@ class DropleNetwork {
 
   void rejectPairing(String peerId) => _bindings.rejectPairing(peerId);
 
+  void disconnectPeer(String peerId) => _bindings.disconnectPeer(peerId);
+
+  List<({String peerId, bool accepted})> takePairingNotifications() {
+    final data =
+        jsonDecode(_bindings.pairingNotificationsJson()) as List<dynamic>;
+    return data.map((item) {
+      final notification = item as Map<String, dynamic>;
+      return (
+        peerId: notification['peer_id'] as String,
+        accepted: notification['accepted'] as bool,
+      );
+    }).toList();
+  }
+
   Future<void> addRelay(String addr) async {
     _bindings.addRelay(addr);
   }

@@ -6,6 +6,9 @@ use crate::sync::protocol::NoteDelta;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WireMessage {
     PairingRequest,
+    PairingResult {
+        accepted: bool,
+    },
     Sync {
         deltas: Vec<NoteDelta>,
     },

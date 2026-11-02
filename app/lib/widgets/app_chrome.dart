@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_language.dart';
 import '../l10n/l10n.dart';
+import '../screens/about_screen.dart';
 import '../screens/profile_screen.dart';
 import '../theme/app_theme.dart';
 
@@ -20,6 +21,12 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
+  }
+
+  void _openAbout(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const AboutScreen()));
   }
 
   void _toggleLanguage() {
@@ -42,29 +49,42 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
       shape: const Border(
         bottom: BorderSide(color: AppColors.surfaceContainerHigh),
       ),
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(7),
-            child: Image.asset(
-              'assets/logo.png',
-              width: 28,
-              height: 28,
-              fit: BoxFit.cover,
+      title: Tooltip(
+        message: l.t('about.title'),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _openAbout(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: Image.asset(
+                      'assets/logo.png',
+                      width: 28,
+                      height: 28,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Text(
+                    'Drople',
+                    style: inter(
+                      16,
+                      weight: FontWeight.w700,
+                      color: AppColors.onSurface,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 9),
-          Text(
-            'Drople',
-            style: inter(
-              16,
-              weight: FontWeight.w700,
-              color: AppColors.onSurface,
-              letterSpacing: 0.4,
-            ),
-          ),
-        ],
+        ),
       ),
       actions: [
         _HeaderButton(

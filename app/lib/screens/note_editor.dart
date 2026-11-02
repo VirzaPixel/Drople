@@ -307,6 +307,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       maxLines: null,
                       decoration: InputDecoration(
                         hintText: l.t('editor.titleHint'),
+                        hintStyle: theme.textTheme.displaySmall?.copyWith(
+                          fontSize: 30,
+                          height: 1.2,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onSurfaceVariant.withValues(
+                            alpha: 0.78,
+                          ),
+                        ),
                         filled: false,
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
@@ -323,12 +331,23 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       child: TextField(
                         controller: _content,
                         focusNode: _contentFocus,
-                        style: theme.textTheme.bodyLarge?.copyWith(height: 1.7),
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontSize: 17,
+                          height: 1.75,
+                          color: AppColors.onSurface,
+                        ),
                         maxLines: null,
                         expands: true,
                         textAlignVertical: TextAlignVertical.top,
                         decoration: InputDecoration(
                           hintText: l.t('editor.contentHint'),
+                          hintStyle: theme.textTheme.bodyLarge?.copyWith(
+                            fontSize: 17,
+                            height: 1.75,
+                            color: AppColors.onSurfaceVariant.withValues(
+                              alpha: 0.9,
+                            ),
+                          ),
                           filled: false,
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,

@@ -116,6 +116,22 @@ pub fn pending_approvals_json() -> Result<String> {
     Ok(serde_json::to_string(&requests)?)
 }
 
+pub fn pairing_notifications_json() -> Result<String> {
+    handle_with(|handle| {
+        let notifications = handle
+            .take_pairing_notifications()
+            .into_iter()
+            .map(|(peer_id, accepted)| {
+                serde_json::json!({
+                    "peer_id": peer_id,
+                    "accepted": accepted,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(serde_json::to_string(&notifications)?)
+    })
+}
+
 pub fn approve_peer(peer_id: &str) -> Result<()> {
     handle_with(|handle| {
         handle.approve_peer(peer_id);
@@ -126,6 +142,13 @@ pub fn approve_peer(peer_id: &str) -> Result<()> {
 pub fn reject_peer(peer_id: &str) -> Result<()> {
     handle_with(|handle| {
         handle.reject_peer(peer_id);
+        Ok(())
+    })
+}
+
+pub fn disconnect_peer(peer_id: &str) -> Result<()> {
+    handle_with(|handle| {
+        handle.disconnect_peer(peer_id);
         Ok(())
     })
 }

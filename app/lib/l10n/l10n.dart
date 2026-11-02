@@ -28,6 +28,8 @@ class L10n {
     'app.chooseLanguage': ('Pilih bahasa', 'Choose language'),
     'app.indonesian': ('Bahasa Indonesia', 'Indonesian'),
     'app.english': ('English', 'English'),
+    'about.title': ('Tentang Drople', 'About Drople'),
+    'about.credit': ('Dibuat dengan ❤️ oleh Virza', 'Made with ❤️ by Virza'),
     'profile.title': ('Profil Perangkat', 'Device Profile'),
     'profile.deviceName': ('Nama perangkat', 'Device name'),
     'profile.hint': (
@@ -84,6 +86,15 @@ class L10n {
     'peers.connected': ('Terhubung', 'Connected'),
     'peers.lastSeen': ('Terakhir {time}', 'Last seen {time}'),
     'peers.sendFile': ('Kirim Berkas', 'Send File'),
+    'peers.disconnect': ('Putuskan', 'Disconnect'),
+    'peers.disconnected': (
+      'Sambungan dengan {device} diputus',
+      'Disconnected from {device}',
+    ),
+    'peers.disconnectFailed': (
+      'Gagal memutus sambungan',
+      'Could not disconnect device',
+    ),
     'peers.connect': ('Hubungkan', 'Connect'),
     'peers.radarDevice': ('Perangkat', 'Device'),
     'peers.dialogTitle': ('Masukkan Kode', 'Enter Code'),
@@ -165,6 +176,7 @@ class L10n {
       'File sudah dihapus dari arsip',
       'File was removed from the archive',
     ),
+    'myfile.openFile': ('Ketuk untuk membuka', 'Tap to open'),
     'peers.pairRequestTitle': ('Permintaan koneksi', 'Connection request'),
     'peers.pairRequestMessage': (
       '{device} ingin terhubung ke perangkat ini. Izinkan koneksi?',
@@ -172,6 +184,10 @@ class L10n {
     ),
     'peers.pairAccept': ('Izinkan', 'Allow'),
     'peers.pairReject': ('Tolak', 'Reject'),
+    'peers.pairRejected': (
+      'Permintaan koneksi ditolak oleh {device}',
+      'Connection request was rejected by {device}',
+    ),
     'peers.relayTitle': ('Tambah Relay', 'Add Relay'),
     'peers.relayAdd': ('Tambah', 'Add'),
     'peers.relayAdded': ('Relay ditambahkan', 'Relay added'),

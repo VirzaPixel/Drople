@@ -119,6 +119,12 @@ class _PeersScreenState extends State<PeersScreen> {
       final signature =
           '$code|${peers.map((p) => '${p.id}:${p.connected}:${p.name}:${p.code}:${p.lastSeen}').join(',')}';
       if (!mounted) return;
+      for (final notification in widget.network.takePairingNotifications()) {
+        if (notification.accepted) continue;
+        final peer = peers.where((item) => item.id == notification.peerId);
+        final device = peer.isEmpty ? notification.peerId : peer.first.name;
+        _toast(context.l10n.t('peers.pairRejected', {'device': device}));
+      }
       _checkPairingRequests();
       if (silent && signature == _lastSignature) return;
       _lastSignature = signature;
@@ -396,6 +402,22 @@ class _PeersScreenState extends State<PeersScreen> {
       _toast(l.t('peers.sending', {'file': file!.name, 'peer': peer.name}));
     } catch (_) {
       _toast(l.t('peers.sendFailed'));
+    }
+  }
+
+  void _disconnectPeer(PeerEntry peer) {
+    try {
+      widget.network.disconnectPeer(peer.id);
+      _toast(
+        context.l10n.t('peers.disconnected', {
+          'device': peer.name.trim().isEmpty
+              ? context.l10n.t('peers.unnamed')
+              : peer.name.trim(),
+        }),
+      );
+      _load(silent: false);
+    } catch (_) {
+      _toast(context.l10n.t('peers.disconnectFailed'));
     }
   }
 
@@ -767,121 +789,136 @@ class _PeersScreenState extends State<PeersScreen> {
 
     return AppCard(
       padding: const EdgeInsets.all(12),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Icon(
-              _peerIconFor(peer),
-              size: 20,
-              color: isOnline ? AppColors.primary : AppColors.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  _peerIconFor(peer),
+                  size: 20,
+                  color: isOnline
+                      ? AppColors.primary
+                      : AppColors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall,
-                      ),
-                    ),
-                    if (peer.code.isNotEmpty) ...[
-                      const SizedBox(width: 7),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Text(
-                          peer.code,
-                          style: inter(
-                            9,
-                            weight: FontWeight.w600,
-                            color: AppColors.onSurfaceVariant,
-                            letterSpacing: 0.7,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall,
                           ),
                         ),
-                      ),
-                    ],
+                        if (peer.code.isNotEmpty) ...[
+                          const SizedBox(width: 7),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              peer.code,
+                              style: inter(
+                                9,
+                                weight: FontWeight.w600,
+                                color: AppColors.onSurfaceVariant,
+                                letterSpacing: 0.7,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            color: isOnline
+                                ? AppColors.primary
+                                : AppColors.onSurfaceVariant,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: isOnline
-                            ? AppColors.primary
-                            : AppColors.onSurfaceVariant,
-                        shape: BoxShape.circle,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => isOnline ? _send(peer) : _connectPeer(peer),
+                  icon: Icon(
+                    isOnline ? Icons.send_rounded : Icons.link_rounded,
+                    size: 16,
+                  ),
+                  label: Text(
+                    isOnline ? l.t('peers.sendFile') : l.t('peers.connect'),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.onSurface,
+                    backgroundColor: AppColors.surfaceContainerLowest,
+                    side: const BorderSide(
+                      color: AppColors.surfaceContainerHigh,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+              if (isOnline) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _disconnectPeer(peer),
+                    icon: const Icon(Icons.link_off_rounded, size: 16),
+                    label: Text(l.t('peers.disconnect')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                      backgroundColor: AppColors.surfaceContainerLowest,
+                      side: BorderSide(
+                        color: AppColors.danger.withValues(alpha: 0.45),
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 104,
-            height: 36,
-            child: OutlinedButton(
-              onPressed: () => isOnline ? _send(peer) : _connectPeer(peer),
-              style: OutlinedButton.styleFrom(
-                padding: EdgeInsets.zero,
-                backgroundColor: AppColors.surfaceContainerLowest,
-                side: const BorderSide(color: AppColors.surfaceContainerHigh),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    isOnline ? Icons.send_rounded : Icons.link_rounded,
-                    size: 15,
-                    color: AppColors.primary,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    isOnline ? l.t('peers.sendFile') : l.t('peers.connect'),
-                    style: inter(
-                      10,
-                      weight: FontWeight.w600,
-                      color: AppColors.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            ],
           ),
         ],
       ),

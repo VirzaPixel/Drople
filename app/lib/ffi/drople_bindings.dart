@@ -381,11 +381,17 @@ class DropleBindings {
 
   String pendingApprovalsJson() => _stringOut('drople_pending_approvals');
 
+  String pairingNotificationsJson() =>
+      _stringOut('drople_pairing_notifications');
+
   void approvePairing(String peerId) =>
       _callWithString('drople_pairing_approve', peerId);
 
   void rejectPairing(String peerId) =>
       _callWithString('drople_pairing_reject', peerId);
+
+  void disconnectPeer(String peerId) =>
+      _callWithString('drople_network_disconnect', peerId);
 
   String pairingStart() => _stringOut('drople_pairing_start');
 

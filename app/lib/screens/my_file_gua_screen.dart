@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:open_filex/open_filex.dart';
 
 import '../l10n/l10n.dart';
@@ -19,9 +20,11 @@ class MyFileGuaScreen extends StatefulWidget {
 class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
   List<File> _files = const [];
   List<MyFileGuaMessage> _messages = const [];
+  int _unseenFiles = 0;
   bool _loading = true;
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  late final FocusNode _messageFocus = FocusNode(onKeyEvent: _onMessageKey);
 
   @override
   void initState() {
@@ -34,11 +37,13 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
       final results = await Future.wait([
         MyFileGua.listFiles(),
         MyFileGua.listMessages(),
+        MyFileGua.unseenFileCount(),
       ]);
       if (!mounted) return;
       setState(() {
         _files = results[0] as List<File>;
         _messages = results[1] as List<MyFileGuaMessage>;
+        _unseenFiles = results[2] as int;
         _loading = false;
       });
     } catch (_) {
@@ -82,10 +87,32 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
     }
   }
 
+  KeyEventResult _onMessageKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.enter &&
+        HardwareKeyboard.instance.isShiftPressed) {
+      final value = _messageController.value;
+      final selection = value.selection;
+      final start = selection.isValid ? selection.start : value.text.length;
+      final end = selection.isValid ? selection.end : start;
+      final text = value.text.replaceRange(start, end, '\n');
+      _messageController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: start + 1),
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   Future<void> _showFiles() async {
+    await MyFileGua.markFilesViewed();
+    if (!mounted) return;
+    setState(() => _unseenFiles = 0);
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(builder: (_) => const MyFileGuaFilesScreen()),
     );
+    if (!mounted) return;
     await _load();
   }
 
@@ -115,8 +142,9 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
             tooltip: l.t('myfile.viewFiles'),
             onPressed: _showFiles,
             icon: Badge(
-              label: Text('${_files.length}'),
-              isLabelVisible: _files.isNotEmpty,
+              smallSize: 9,
+              backgroundColor: AppColors.danger,
+              isLabelVisible: _unseenFiles > 0,
               child: const Icon(Icons.folder_outlined),
             ),
           ),
@@ -198,46 +226,7 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (message.attachmentName != null)
-              InkWell(
-                onTap: attachmentFile == null
-                    ? null
-                    : () => _open(attachmentFile),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.insert_drive_file_outlined,
-                      color: attachmentFile == null
-                          ? AppColors.amber
-                          : AppColors.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        message.attachmentName!,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: attachmentFile == null
-                              ? AppColors.amber
-                              : AppColors.onSurface,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (message.attachmentName != null && attachmentFile == null)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  context.l10n.t('myfile.fileMissing'),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.amber,
-                  ),
-                ),
-              ),
+              _attachmentCard(message.attachmentName!, attachmentFile),
             if (message.text.isNotEmpty) ...[
               if (message.attachmentName != null) const SizedBox(height: 6),
               Text(
@@ -258,6 +247,86 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
         ),
       ),
     );
+  }
+
+  Widget _attachmentCard(String name, File? file) {
+    final theme = Theme.of(context);
+    final available = file != null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: AppColors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: available ? () => _open(file) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: (available ? AppColors.primary : AppColors.amber)
+                        .withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(
+                    Icons.insert_drive_file_outlined,
+                    color: available ? AppColors.primary : AppColors.amber,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        available
+                            ? '${_formatSize(file.lengthSync())} · ${context.l10n.t('myfile.openFile')}'
+                            : context.l10n.t('myfile.fileMissing'),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: available
+                              ? AppColors.onSurfaceVariant
+                              : AppColors.amber,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  available
+                      ? Icons.open_in_new_rounded
+                      : Icons.warning_amber_rounded,
+                  size: 18,
+                  color: available ? AppColors.primary : AppColors.amber,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   File? _findFile(String name) {
@@ -287,6 +356,7 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
           Expanded(
             child: TextField(
               controller: _messageController,
+              focusNode: _messageFocus,
               minLines: 1,
               maxLines: 5,
               textInputAction: TextInputAction.send,
@@ -320,6 +390,7 @@ class _MyFileGuaScreenState extends State<MyFileGuaScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _messageFocus.dispose();
     super.dispose();
   }
 }
@@ -342,6 +413,7 @@ class _MyFileGuaFilesScreenState extends State<MyFileGuaFilesScreen> {
   }
 
   Future<void> _load() async {
+    await MyFileGua.markFilesViewed();
     final files = await MyFileGua.listFiles();
     if (!mounted) return;
     setState(() {
