@@ -32,6 +32,17 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            (output as? com.android.build.api.variant.impl.VariantOutputImpl)
+                ?.outputFileName
+                ?.set("Drople.apk")
+        }
+    }
 }
 
 kotlin {

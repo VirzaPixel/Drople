@@ -42,14 +42,29 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
       shape: const Border(
         bottom: BorderSide(color: AppColors.surfaceContainerHigh),
       ),
-      title: Text(
-        'Drople',
-        style: inter(
-          16,
-          weight: FontWeight.w700,
-          color: AppColors.onSurface,
-          letterSpacing: 0.4,
-        ),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(7),
+            child: Image.asset(
+              'assets/logo.png',
+              width: 28,
+              height: 28,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 9),
+          Text(
+            'Drople',
+            style: inter(
+              16,
+              weight: FontWeight.w700,
+              color: AppColors.onSurface,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
       ),
       actions: [
         _HeaderButton(

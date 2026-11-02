@@ -320,11 +320,13 @@ class BrandMark extends StatelessWidget {
           ),
         ],
       ),
-      child: Center(
-        child: Icon(
-          Icons.water_drop_rounded,
-          color: primary,
-          size: size * 0.52,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.24),
+        child: Image.asset(
+          'assets/logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
         ),
       ),
     );
