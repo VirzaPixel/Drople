@@ -15,6 +15,76 @@ import '../theme/app_theme.dart';
 import '../widgets/qr_scanner_screen.dart';
 import '../widgets/ui.dart';
 
+IconData _peerIconFor(PeerEntry peer) {
+  final platform = peer.platform.toLowerCase();
+  if (platform.contains('android') || platform == 'ios') {
+    return Icons.phone_android_rounded;
+  }
+  if (platform == 'linux' || platform == 'macos' || platform == 'windows') {
+    return Icons.laptop_rounded;
+  }
+
+  final name = peer.name.toLowerCase();
+  bool hasName(List<String> keys) => keys.any(name.contains);
+
+  if (hasName([
+    'macbook',
+    'imac',
+    'thinkpad',
+    'laptop',
+    'notebook',
+    'desktop',
+    'ubuntu',
+    'debian',
+    'fedora',
+    'linux',
+    'mint',
+    'manjaro',
+    'opensuse',
+    'kali',
+    'zorin',
+    'elementary',
+    'raspberry',
+    'windows',
+    'pc',
+    'workstation',
+    'server',
+    'lenovo',
+    'dell',
+    'asus',
+    'acer',
+    'msi',
+    'toshiba',
+    'surface',
+  ])) {
+    return Icons.laptop_rounded;
+  }
+  if (hasName([
+    'iphone',
+    'ipad',
+    'galaxy',
+    'pixel',
+    'android',
+    'phone',
+    'redmi',
+    'poco',
+    'xiaomi',
+    'oppo',
+    'vivo',
+    'realme',
+    'infinix',
+    'tecno',
+    'oneplus',
+    'motorola',
+    'huawei',
+    'honor',
+    'sm-',
+  ])) {
+    return Icons.phone_android_rounded;
+  }
+  return Icons.devices_other_rounded;
+}
+
 class PeersScreen extends StatefulWidget {
   const PeersScreen({super.key, required this.network, required this.files});
 
@@ -282,25 +352,6 @@ class _PeersScreenState extends State<PeersScreen> {
     } else {
       await _manualCode();
     }
-  }
-
-  IconData _peerIcon(PeerEntry peer) {
-    final name = peer.name.toLowerCase();
-    if (name.contains('macbook') ||
-        name.contains('thinkpad') ||
-        name.contains('laptop') ||
-        name.contains('pc') ||
-        name.contains('windows')) {
-      return Icons.laptop_rounded;
-    }
-    if (name.contains('iphone') ||
-        name.contains('galaxy') ||
-        name.contains('pixel') ||
-        name.contains('android') ||
-        name.contains('phone')) {
-      return Icons.phone_android_rounded;
-    }
-    return Icons.devices_other_rounded;
   }
 
   @override
@@ -619,7 +670,7 @@ class _PeersScreenState extends State<PeersScreen> {
               borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
-              _peerIcon(peer),
+              _peerIconFor(peer),
               size: 20,
               color: isOnline ? AppColors.primary : AppColors.onSurfaceVariant,
             ),
@@ -836,11 +887,7 @@ class _RadarCardState extends State<_RadarCard>
 
   Widget _node(PeerEntry peer) {
     final l = context.l10n;
-    final icon =
-        peer.name.toLowerCase().contains('macbook') ||
-            peer.name.toLowerCase().contains('book')
-        ? Icons.laptop_mac_rounded
-        : Icons.phone_android_rounded;
+    final icon = _peerIconFor(peer);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

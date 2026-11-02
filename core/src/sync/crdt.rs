@@ -143,11 +143,7 @@ impl NoteCRDT {
 }
 
 /// Merge dua catatan dengan CRDT.
-pub fn merge_notes(
-    local: &NoteCRDT,
-    remote: &NoteCRDT,
-    _local_peer_id: &str,
-) -> NoteCRDT {
+pub fn merge_notes(local: &NoteCRDT, remote: &NoteCRDT, _local_peer_id: &str) -> NoteCRDT {
     local.merge(remote)
 }
 

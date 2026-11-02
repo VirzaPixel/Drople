@@ -88,7 +88,9 @@ impl DropleError {
             DropleError::InvalidPairingCode | DropleError::PairingNotFound => "pairing",
             DropleError::Crypto(_) => "crypto",
             DropleError::RecoveryKeyMissing => "security",
-            DropleError::DriveNotConnected | DropleError::QuotaExceeded | DropleError::DriveTransfer(_) => "google_drive",
+            DropleError::DriveNotConnected
+            | DropleError::QuotaExceeded
+            | DropleError::DriveTransfer(_) => "google_drive",
             DropleError::Auth(_) => "authentication",
         }
     }

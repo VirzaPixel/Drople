@@ -143,7 +143,8 @@ mod tests {
         let path = dir.join(format!("drople_test_{}.bin", uuid::Uuid::new_v4()));
         {
             let mut file = std::fs::File::create(&path).unwrap();
-            file.write_all(b"Hello World! This is a test file for Drople P2P transfer.").unwrap();
+            file.write_all(b"Hello World! This is a test file for Drople P2P transfer.")
+                .unwrap();
         }
 
         let transfer_id = "test_transfer_1".to_string();

@@ -53,7 +53,12 @@ pub fn mark_all_synced() -> Result<()> {
         let pending = db::get_pending_notes(conn)?;
         for note in pending {
             let note = db::get_note_any(conn, &note.id)?;
-            db::mark_note_synced(conn, &note.id, &note.vector_clock, note.source_peer_id.as_deref())?;
+            db::mark_note_synced(
+                conn,
+                &note.id,
+                &note.vector_clock,
+                note.source_peer_id.as_deref(),
+            )?;
         }
         Ok(())
     })

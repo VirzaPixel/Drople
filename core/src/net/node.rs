@@ -44,6 +44,8 @@ pub struct PeerEntry {
     pub fingerprint: String,
     #[serde(default)]
     pub code: String,
+    #[serde(default)]
+    pub platform: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,10 +59,15 @@ pub struct SharedState {
 
 #[derive(Debug)]
 enum NetworkCommand {
-    DialPeer { peer_id: String, addrs: Vec<String> },
+    DialPeer {
+        peer_id: String,
+        addrs: Vec<String>,
+    },
     DialAddr(String),
     AddRelay(String),
-    SyncPeer { peer_id: String },
+    SyncPeer {
+        peer_id: String,
+    },
     SendFile {
         peer_id: String,
         transfer_id: String,
@@ -77,14 +84,18 @@ struct DropleBehaviour {
     mdns: mdns::tokio::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
-    wire: request_response::Behaviour<request_response::json::codec::Codec<WireMessage, WireMessage>>,
+    wire:
+        request_response::Behaviour<request_response::json::codec::Codec<WireMessage, WireMessage>>,
 }
 
 struct OutboundTransfer {
     peer: PeerId,
+    file_name: String,
     file_size: i64,
+    file_hash: String,
     chunks: Vec<chunking::FileChunk>,
     next_index: usize,
+    offer_acked: bool,
 }
 
 struct IncomingTransfer {
@@ -92,6 +103,7 @@ struct IncomingTransfer {
     hasher: Sha256,
     expected_hash: String,
     written: i64,
+    received: std::collections::HashSet<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -158,11 +170,9 @@ impl NodeHandle {
     }
 
     pub fn request_sync(&self, peer_id: &str) {
-        let _ = self
-            .cmd_tx
-            .send_blocking(NetworkCommand::SyncPeer {
-                peer_id: peer_id.to_string(),
-            });
+        let _ = self.cmd_tx.send_blocking(NetworkCommand::SyncPeer {
+            peer_id: peer_id.to_string(),
+        });
     }
 
     pub fn send_file(&self, peer_id: &str, transfer_id: &str, file_path: &str) {
@@ -178,11 +188,7 @@ impl NodeHandle {
     }
 }
 
-pub fn spawn(
-    keypair: Keypair,
-    db_path: Option<String>,
-    device_name: String,
-) -> Result<NodeHandle> {
+pub fn spawn(keypair: Keypair, db_path: Option<String>, device_name: String) -> Result<NodeHandle> {
     let local_peer_id = keypair.public().to_peer_id().to_string();
     let local_fingerprint = identity::fingerprint_for(&keypair);
     let local_code = pairing::short_code(&local_peer_id);
@@ -321,12 +327,11 @@ async fn run(
 
 fn build_swarm(keypair: Keypair, device_name: String) -> Result<Swarm<DropleBehaviour>> {
     let local_peer_id = keypair.public().to_peer_id();
-    let codec =
-        request_response::json::codec::Codec::<WireMessage, WireMessage>::default()
-            .set_request_size_maximum(4 * 1024 * 1024)
-            .set_response_size_maximum(32 * 1024 * 1024);
-    let rr_config = request_response::Config::default()
-        .with_request_timeout(Duration::from_secs(120));
+    let codec = request_response::json::codec::Codec::<WireMessage, WireMessage>::default()
+        .set_request_size_maximum(4 * 1024 * 1024)
+        .set_response_size_maximum(32 * 1024 * 1024);
+    let rr_config =
+        request_response::Config::default().with_request_timeout(Duration::from_secs(120));
 
     let swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
@@ -348,16 +353,14 @@ fn build_swarm(keypair: Keypair, device_name: String) -> Result<Swarm<DropleBeha
                     key.public().to_peer_id(),
                 )?,
                 identify: identify::Behaviour::new(
-                    identify::Config::new("/drople/1.0.0".into(), key.public())
-                        .with_agent_version(format!("Drople|{device_name}")),
+                    identify::Config::new("/drople/1.0.0".into(), key.public()).with_agent_version(
+                        format!("Drople|{}|{device_name}", std::env::consts::OS),
+                    ),
                 ),
                 ping: ping::Behaviour::default(),
                 wire: request_response::Behaviour::with_codec(
                     codec,
-                    [(
-                        StreamProtocol::new(WIRE_PROTOCOL),
-                        ProtocolSupport::Full,
-                    )],
+                    [(StreamProtocol::new(WIRE_PROTOCOL), ProtocolSupport::Full)],
                     rr_config,
                 ),
             })
@@ -391,6 +394,7 @@ fn upsert_peer(
     addrs: &[Multiaddr],
     connected: Option<bool>,
     fingerprint: Option<&str>,
+    platform: Option<&str>,
 ) {
     let id = peer_id.to_string();
     let addr_strings: Vec<String> = addrs.iter().map(|a| a.to_string()).collect();
@@ -405,6 +409,7 @@ fn upsert_peer(
             addresses: Vec::new(),
             fingerprint: String::new(),
             code: pairing::short_code(&id),
+            platform: String::new(),
         });
         if let Some(n) = name {
             entry.name = n.to_string();
@@ -417,6 +422,9 @@ fn upsert_peer(
         }
         if let Some(f) = fingerprint {
             entry.fingerprint = f.to_string();
+        }
+        if let Some(p) = platform {
+            entry.platform = p.to_string();
         }
         entry.last_seen = now_millis();
     }
@@ -469,7 +477,8 @@ fn handle_swarm_event(
         }
         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
             set_connected(shared, db_conn, &peer_id, true);
-            upsert_peer(shared, db_conn, &peer_id, None, &[], Some(true), None);
+            upsert_peer(shared, db_conn, &peer_id, None, &[], Some(true), None, None);
+            resume_peer_transfers(swarm, wire, db_conn, &peer_id);
         }
         SwarmEvent::ConnectionClosed {
             peer_id,
@@ -492,7 +501,16 @@ fn handle_swarm_event(
                     if peer_id == *swarm.local_peer_id() {
                         continue;
                     }
-                    upsert_peer(shared, db_conn, &peer_id, None, &[addr.clone()], None, None);
+                    upsert_peer(
+                        shared,
+                        db_conn,
+                        &peer_id,
+                        None,
+                        &[addr.clone()],
+                        None,
+                        None,
+                        None,
+                    );
                     let _ = swarm.dial(addr);
                 }
             }
@@ -505,16 +523,23 @@ fn handle_swarm_event(
         SwarmEvent::Behaviour(DropleBehaviourEvent::Identify(event)) => {
             if let identify::Event::Received { peer_id, info, .. } = event {
                 let raw = info.agent_version;
-                let name = raw
-                    .strip_prefix("Drople|")
-                    .map(str::to_string)
-                    .unwrap_or_else(|| {
-                        if raw.contains("libp2p") || raw.contains("rust-") {
-                            format!("Perangkat {}", &peer_id.to_string()[..6.min(peer_id.to_string().len())])
+                let (platform, name) = match raw.strip_prefix("Drople|") {
+                    Some(rest) => match rest.split_once('|') {
+                        Some((platform, name)) => (Some(platform.to_string()), name.to_string()),
+                        None => (None, rest.to_string()),
+                    },
+                    None => {
+                        let name = if raw.contains("libp2p") || raw.contains("rust-") {
+                            format!(
+                                "Perangkat {}",
+                                &peer_id.to_string()[..6.min(peer_id.to_string().len())]
+                            )
                         } else {
-                            raw
-                        }
-                    });
+                            raw.clone()
+                        };
+                        (None, name)
+                    }
+                };
                 upsert_peer(
                     shared,
                     db_conn,
@@ -523,6 +548,7 @@ fn handle_swarm_event(
                     &info.listen_addrs,
                     None,
                     None,
+                    platform.as_deref(),
                 );
             }
         }
@@ -594,22 +620,30 @@ fn start_outbound_file(
     let file_hash = chunking::file_hash(path).unwrap_or_default();
     let transfer = OutboundTransfer {
         peer,
+        file_name,
         file_size: total,
+        file_hash,
         chunks,
         next_index: 0,
+        offer_acked: false,
     };
     wire.outbound.insert(transfer_id.to_string(), transfer);
     update_transfer_status(db_conn, transfer_id, "active");
+    send_file_offer(swarm, wire, transfer_id);
+}
 
-    let request_id = swarm.behaviour_mut().wire.send_request(
-        &peer,
-        WireMessage::FileOffer {
-            transfer_id: transfer_id.to_string(),
-            file_name,
-            file_size: total,
-            file_hash,
-        },
-    );
+fn send_file_offer(swarm: &mut Swarm<DropleBehaviour>, wire: &mut WireState, transfer_id: &str) {
+    let Some(transfer) = wire.outbound.get(transfer_id) else {
+        return;
+    };
+    let peer = transfer.peer;
+    let request = WireMessage::FileOffer {
+        transfer_id: transfer_id.to_string(),
+        file_name: transfer.file_name.clone(),
+        file_size: transfer.file_size,
+        file_hash: transfer.file_hash.clone(),
+    };
+    let request_id = swarm.behaviour_mut().wire.send_request(&peer, request);
     wire.pending.insert(
         request_id,
         PendingAction {
@@ -617,6 +651,49 @@ fn start_outbound_file(
             kind: PendingKind::Offer,
         },
     );
+}
+
+fn resume_transfer(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    db_conn: &Option<Connection>,
+    transfer_id: &str,
+) {
+    let Some(transfer) = wire.outbound.get(transfer_id) else {
+        return;
+    };
+    if wire.pending.values().any(|a| a.transfer_id == transfer_id) {
+        return;
+    }
+    if transfer.offer_acked {
+        update_transfer_status(db_conn, transfer_id, "active");
+        send_next_chunk(swarm, wire, db_conn, transfer_id);
+    } else {
+        update_transfer_status(db_conn, transfer_id, "active");
+        send_file_offer(swarm, wire, transfer_id);
+    }
+}
+
+fn resume_peer_transfers(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    db_conn: &Option<Connection>,
+    peer: &PeerId,
+) {
+    let pending: Vec<String> = wire
+        .pending
+        .values()
+        .map(|a| a.transfer_id.clone())
+        .collect();
+    let ids: Vec<String> = wire
+        .outbound
+        .iter()
+        .filter(|(id, t)| t.peer == *peer && !pending.contains(id))
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in ids {
+        resume_transfer(swarm, wire, db_conn, &id);
+    }
 }
 
 fn send_next_chunk(
@@ -687,29 +764,43 @@ fn handle_wire_event(
             ReqResMessage::Request {
                 request, channel, ..
             } => {
-                let response =
-                    handle_incoming_request(request, &peer, shared, db_conn, wire);
+                let response = handle_incoming_request(request, &peer, shared, db_conn, wire);
                 let _ = swarm.behaviour_mut().wire.send_response(channel, response);
             }
             ReqResMessage::Response {
                 request_id,
                 response,
                 ..
-            } => handle_wire_response(
-                request_id,
-                response,
-                db_conn,
-                swarm,
-                wire,
-            ),
+            } => handle_wire_response(request_id, response, db_conn, swarm, wire),
         },
         request_response::Event::OutboundFailure {
             request_id, error, ..
         } => {
             let _ = error;
-            if let Some(action) = wire.pending.remove(&request_id) {
-                let _ = wire.outbound.remove(&action.transfer_id);
+            let Some(action) = wire.pending.remove(&request_id) else {
+                return;
+            };
+            if action.kind == PendingKind::Chunk {
+                if let Some(transfer) = wire.outbound.get_mut(&action.transfer_id) {
+                    transfer.next_index = transfer.next_index.saturating_sub(1);
+                }
+            }
+            let Some(peer) = wire.outbound.get(&action.transfer_id).map(|t| t.peer) else {
                 mark_transfer_failed(db_conn, &action.transfer_id);
+                return;
+            };
+            update_transfer_status(db_conn, &action.transfer_id, "pending");
+            let connected = shared
+                .lock()
+                .map(|s| {
+                    s.peers
+                        .get(&peer.to_string())
+                        .map(|p| p.connected)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if connected {
+                resume_transfer(swarm, wire, db_conn, &action.transfer_id);
             }
         }
         _ => {}
@@ -731,13 +822,29 @@ fn handle_wire_response(
                 return;
             };
             if !ok {
-                let _ = message;
+                if wire.outbound.contains_key(&action.transfer_id)
+                    && message.contains("tidak dikenal")
+                {
+                    if let Some(transfer) = wire.outbound.get_mut(&action.transfer_id) {
+                        transfer.next_index = 0;
+                        transfer.offer_acked = false;
+                    }
+                    update_transfer_status(db_conn, &action.transfer_id, "pending");
+                    send_file_offer(swarm, wire, &action.transfer_id);
+                    return;
+                }
                 let _ = wire.outbound.remove(&action.transfer_id);
                 mark_transfer_failed(db_conn, &action.transfer_id);
                 return;
             }
             match action.kind {
-                PendingKind::Offer | PendingKind::Chunk => {
+                PendingKind::Offer => {
+                    if let Some(transfer) = wire.outbound.get_mut(&action.transfer_id) {
+                        transfer.offer_acked = true;
+                    }
+                    send_next_chunk(swarm, wire, db_conn, &action.transfer_id);
+                }
+                PendingKind::Chunk => {
                     send_next_chunk(swarm, wire, db_conn, &action.transfer_id);
                 }
                 PendingKind::Done => {
@@ -806,6 +913,9 @@ fn handle_incoming_request(
             if actual != chunk_hash {
                 return WireMessage::nack("hash chunk tidak cocok");
             }
+            if incoming.received.contains(&index) {
+                return WireMessage::ack("chunk sudah diterima");
+            }
             let offset = index as u64 * chunking::CHUNK_SIZE as u64;
             if let Err(e) = incoming.file.seek(SeekFrom::Start(offset)) {
                 return WireMessage::nack(e.to_string());
@@ -814,6 +924,7 @@ fn handle_incoming_request(
                 return WireMessage::nack(e.to_string());
             }
             incoming.hasher.update(&bytes);
+            incoming.received.insert(index);
             incoming.written += bytes.len() as i64;
             set_transfer_progress(db_conn, &transfer_id, incoming.written);
             WireMessage::ack("chunk diterima")
@@ -885,6 +996,7 @@ fn prepare_incoming(
         hasher: Sha256::new(),
         expected_hash: file_hash.to_string(),
         written: 0,
+        received: std::collections::HashSet::new(),
     })
 }
 
@@ -922,11 +1034,7 @@ fn sha256_hex(data: &[u8]) -> String {
 }
 
 fn hex_digest(digest: impl AsRef<[u8]>) -> String {
-    digest
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn dial_peer(
@@ -959,7 +1067,11 @@ fn dial_peer(
 /// Membuat kode pairing untuk handle, dipakai test.
 pub fn pairing_code_for(handle: &NodeHandle) -> String {
     let state = handle.snapshot();
-    pairing::new_code(state.local_peer_id, state.listen_addrs, state.local_fingerprint)
+    pairing::new_code(
+        state.local_peer_id,
+        state.listen_addrs,
+        state.local_fingerprint,
+    )
 }
 
 #[cfg(test)]
@@ -976,11 +1088,13 @@ mod tests {
 
     #[test]
     fn two_nodes_connect_over_loopback() {
-        let node_a = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
+        let node_a =
+            spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
         node_a.wait_listen_addr(Duration::from_secs(5));
         let addr = tcp_loopback_addr(&node_a).expect("A punya listen addr");
 
-        let node_b = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn B");
+        let node_b =
+            spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn B");
         node_b.wait_listen_addr(Duration::from_secs(5));
         node_b.dial_addr(&addr);
 
@@ -1016,7 +1130,8 @@ mod tests {
         let content = b"Hello from Drople file transfer!";
         std::fs::write(&source, content).expect("source");
 
-        let node_a = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
+        let node_a =
+            spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
         node_a.wait_listen_addr(Duration::from_secs(5));
         let node_b = spawn(
             Keypair::generate_ed25519(),
@@ -1043,13 +1158,20 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
 
-        node_a.send_file(node_b.local_peer_id(), "transfer-test", &source.to_string_lossy());
+        node_a.send_file(
+            node_b.local_peer_id(),
+            "transfer-test",
+            &source.to_string_lossy(),
+        );
 
         let target = recv_dir.join("hello.txt");
         let mut ok = false;
         let started = std::time::Instant::now();
         while started.elapsed() < Duration::from_secs(15) {
-            if std::fs::read(&target).map(|d| d == content).unwrap_or(false) {
+            if std::fs::read(&target)
+                .map(|d| d == content)
+                .unwrap_or(false)
+            {
                 ok = true;
                 break;
             }
@@ -1064,8 +1186,10 @@ mod tests {
     #[test]
     #[ignore = "butuh multicast mDNS aktif di jaringan lokal"]
     fn two_nodes_discover_via_mdns() {
-        let node_a = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
-        let node_b = spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn B");
+        let node_a =
+            spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn A");
+        let node_b =
+            spawn(Keypair::generate_ed25519(), None, "Test Device".into()).expect("spawn B");
 
         let peer_a = node_a.local_peer_id().to_string();
         let started = std::time::Instant::now();

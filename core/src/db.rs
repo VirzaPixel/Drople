@@ -398,7 +398,11 @@ pub fn upsert_note_from_sync(
     deleted_at: Option<i64>,
     created_at: i64,
 ) -> Result<()> {
-    let created = if created_at > 0 { created_at } else { updated_at };
+    let created = if created_at > 0 {
+        created_at
+    } else {
+        updated_at
+    };
     conn.execute(
         "INSERT INTO notes
             (id, title, content, created_at, updated_at, version, is_favorite,

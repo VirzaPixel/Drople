@@ -96,7 +96,10 @@ mod tests {
         let mut encrypted = encrypt(b"secret", &key).unwrap();
         let last = encrypted.len() - 1;
         encrypted[last] ^= 0x01;
-        assert!(matches!(decrypt(&encrypted, &key), Err(DropleError::Crypto(_))));
+        assert!(matches!(
+            decrypt(&encrypted, &key),
+            Err(DropleError::Crypto(_))
+        ));
     }
 
     #[test]

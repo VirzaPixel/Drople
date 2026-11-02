@@ -658,6 +658,7 @@ class _FilesScreenState extends State<FilesScreen> {
     return AppCard(
       padding: const EdgeInsets.all(12),
       color: isFailed ? AppColors.danger.withValues(alpha: 0.06) : null,
+      onTap: isDone ? () => _open(item) : null,
       child: Row(
         children: [
           Container(

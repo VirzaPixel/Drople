@@ -3,8 +3,8 @@ pub mod transfer;
 
 use crate::db;
 use crate::error::{DropleError, Result};
-use crate::with_engine;
 use crate::file::transfer::{FileTransfer, TransferDirection, TransferManager};
+use crate::with_engine;
 
 use std::path::Path;
 use uuid::Uuid;
@@ -13,9 +13,9 @@ static TRANSFER_MANAGER: once_cell::sync::Lazy<std::sync::Mutex<TransferManager>
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(TransferManager::new()));
 
 fn manager() -> Result<std::sync::MutexGuard<'static, TransferManager>> {
-    TRANSFER_MANAGER.lock().map_err(|_| {
-        DropleError::Internal("transfer manager lock poisoned".into())
-    })
+    TRANSFER_MANAGER
+        .lock()
+        .map_err(|_| DropleError::Internal("transfer manager lock poisoned".into()))
 }
 
 /// Mulai mengirim file ke peer.
@@ -25,13 +25,12 @@ pub fn file_send(peer_id: &str, file_path: &str) -> Result<String> {
         return Err(DropleError::NotFound);
     }
 
-    let metadata = path.metadata().map_err(|e| {
-        DropleError::Internal(format!("gagal baca metadata file: {e}"))
-    })?;
+    let metadata = path
+        .metadata()
+        .map_err(|e| DropleError::Internal(format!("gagal baca metadata file: {e}")))?;
     let file_size = metadata.len() as i64;
-    let file_hash = chunking::file_hash(path).map_err(|e| {
-        DropleError::Internal(format!("gagal hitung hash: {e}"))
-    })?;
+    let file_hash = chunking::file_hash(path)
+        .map_err(|e| DropleError::Internal(format!("gagal hitung hash: {e}")))?;
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -43,13 +42,7 @@ pub fn file_send(peer_id: &str, file_path: &str) -> Result<String> {
     // Simpan ke DB
     with_engine(|e| {
         db::create_file_transfer(
-            &e.conn,
-            &id,
-            peer_id,
-            &file_name,
-            file_size,
-            &file_hash,
-            "send",
+            &e.conn, &id, peer_id, &file_name, file_size, &file_hash, "send",
         )?;
         db::set_file_transfer_local_path(&e.conn, &id, file_path)?;
         Ok(())

@@ -152,11 +152,7 @@ pub fn exchange_code(code: &str, verifier: &str, redirect_uri: &str) -> Result<(
     runtime()?.block_on(exchange_code_async(code, verifier, redirect_uri))
 }
 
-async fn exchange_code_async(
-    code: &str,
-    verifier: &str,
-    redirect_uri: &str,
-) -> Result<()> {
+async fn exchange_code_async(code: &str, verifier: &str, redirect_uri: &str) -> Result<()> {
     let (client_id, client_secret) = client_credentials()?;
     if client_secret.is_empty() {
         return Err(DropleError::Auth(
@@ -287,10 +283,7 @@ fn multipart_related(metadata: &str, data: &[u8]) -> (String, Vec<u8>) {
     body.extend_from_slice(data);
     body.extend_from_slice(b"\r\n");
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
-    (
-        format!("multipart/related; boundary={boundary}"),
-        body,
-    )
+    (format!("multipart/related; boundary={boundary}"), body)
 }
 
 async fn upload_async(file_name: &str, data: Vec<u8>) -> Result<String> {

@@ -8,6 +8,7 @@ class PeerEntry {
     required this.addresses,
     this.fingerprint = '',
     this.code = '',
+    this.platform = '',
   });
 
   final String id;
@@ -18,6 +19,7 @@ class PeerEntry {
   final List<String> addresses;
   final String fingerprint;
   final String code;
+  final String platform;
 
   factory PeerEntry.fromJson(Map<String, dynamic> json) {
     return PeerEntry(
@@ -26,12 +28,14 @@ class PeerEntry {
       lastSeen: (json['last_seen'] as num?)?.toInt() ?? 0,
       connected: json['connected'] as bool? ?? false,
       latencyMs: (json['latency_ms'] as num?)?.toInt(),
-      addresses: (json['addresses'] as List<dynamic>?)
+      addresses:
+          (json['addresses'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
           const [],
       fingerprint: json['fingerprint'] as String? ?? '',
       code: json['code'] as String? ?? '',
+      platform: json['platform'] as String? ?? '',
     );
   }
 
@@ -45,6 +49,7 @@ class PeerEntry {
       'addresses': addresses,
       'fingerprint': fingerprint,
       'code': code,
+      'platform': platform,
     };
   }
 

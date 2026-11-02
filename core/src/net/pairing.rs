@@ -101,7 +101,10 @@ mod tests {
         let a = short_code(id);
         assert_eq!(a.len(), 6);
         assert_eq!(a, short_code(id));
-        assert!(a.chars().all(|c| "23456789ABCDEFGHJKLMNPQRSTUVWXYZ".contains(c)));
+        assert!(
+            a.chars()
+                .all(|c| "23456789ABCDEFGHJKLMNPQRSTUVWXYZ".contains(c))
+        );
         assert_ne!(a, short_code("peer-lain"));
         assert_eq!(normalize_short("dro1:ab-23 c4"), "AB23C4");
     }

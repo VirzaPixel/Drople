@@ -68,7 +68,16 @@ pub fn backup_now() -> Result<String> {
     let created_at = db::now_millis();
     let file_name = gdrive::backup_file_name(created_at);
 
-    with_conn(|conn| db::upsert_backup(conn, &file_name, created_at, blob.len() as i64, "uploading", Some(&checksum)))?;
+    with_conn(|conn| {
+        db::upsert_backup(
+            conn,
+            &file_name,
+            created_at,
+            blob.len() as i64,
+            "uploading",
+            Some(&checksum),
+        )
+    })?;
 
     let remote_id = match gdrive::upload(&file_name, blob.clone()) {
         Ok(id) => id,
@@ -197,11 +206,9 @@ mod tests {
             source_peer_id: Some("p".into()),
             sync_status: "synced".into(),
         };
-        let blob = snapshot::encrypt_snapshot(
-            &snapshot::Snapshot::from_notes(vec![note]),
-            &mnemonic,
-        )
-        .unwrap();
+        let blob =
+            snapshot::encrypt_snapshot(&snapshot::Snapshot::from_notes(vec![note]), &mnemonic)
+                .unwrap();
         let restored = snapshot::decrypt_snapshot(&blob, &mnemonic).unwrap();
 
         for n in &restored.notes {
