@@ -32,6 +32,9 @@ class _FilesScreenState extends State<FilesScreen> {
   Timer? _ticker;
   Timer? _storageTicker;
   ({int free, int total})? _storage;
+  double _lanSpeed = 0;
+  int _lastProgressBytes = 0;
+  DateTime _lastSpeedAt = DateTime.now();
   String _lastSignature = '';
   final TextEditingController _search = TextEditingController();
 
@@ -56,6 +59,18 @@ class _FilesScreenState extends State<FilesScreen> {
   void _load({bool silent = true}) {
     try {
       final transfers = widget.files.listTransfers();
+      final progressBytes = transfers.fold<int>(
+        0,
+        (sum, t) => sum + (t.isActive ? t.progress : 0),
+      );
+      final now = DateTime.now();
+      final elapsed = now.difference(_lastSpeedAt).inMilliseconds;
+      if (elapsed > 0) {
+        final delta = progressBytes - _lastProgressBytes;
+        _lanSpeed = delta > 0 ? delta * 1000 / elapsed : 0;
+        _lastProgressBytes = progressBytes;
+        _lastSpeedAt = now;
+      }
       final signature = transfers
           .map((t) => '${t.id}:${t.status}:${t.progress}:${t.completedAt}')
           .join('|');
@@ -341,142 +356,207 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Widget _statsRow(ThemeData theme) {
-    final l = context.l10n;
-    final active = _transfers
-        .where((t) => t.isActive || t.status == 'pending')
-        .length;
+    final storage = _storage;
+    final used = storage == null ? 0 : storage.total - storage.free;
+    final percent = storage == null || storage.total <= 0
+        ? 0.0
+        : (used / storage.total).clamp(0.0, 1.0);
+
     final received = _transfers
         .where((t) => !t.isSend && t.isCompleted)
         .fold<int>(0, (sum, t) => sum + t.fileSize);
+    final receivedFiles = _transfers
+        .where((t) => !t.isSend && t.isCompleted)
+        .length;
 
-    final storage = _storage;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: _statCard(
-            theme,
-            icon: Icons.speed_rounded,
-            label: l.t('files.active'),
-            value: '$active',
-            suffix: l.t('files.running'),
-            footer: l.t('files.e2ee'),
-            dot: true,
-          ),
-        ),
+        Expanded(child: _speedCard(theme)),
         const SizedBox(width: 8),
-        Expanded(
-          child: _statCard(
-            theme,
-            icon: Icons.download_rounded,
-            label: l.t('files.received'),
-            value: formatBytes(received),
-            suffix: '',
-            footer: l.t('files.filesCount', {
-              'count':
-                  '${_transfers.where((t) => !t.isSend && t.isCompleted).length}',
-            }),
-            dot: false,
-          ),
-        ),
+        Expanded(child: _receivedCard(theme, received, receivedFiles)),
         const SizedBox(width: 8),
-        Expanded(
-          child: _statCard(
-            theme,
-            icon: Icons.storage_rounded,
-            label: l.t('files.storage'),
-            value: storage == null ? '—' : formatBytes(storage.free),
-            suffix: storage == null ? '' : l.t('files.free'),
-            footer: storage == null
-                ? l.t('files.unavailable')
-                : l.t('files.ofTotal', {'size': formatBytes(storage.total)}),
-            dot: false,
-          ),
-        ),
+        Expanded(child: _storageCard(theme, storage, used, percent)),
       ],
     );
   }
 
-  Widget _statCard(
-    ThemeData theme, {
-    required IconData icon,
-    required String label,
-    required String value,
-    required String suffix,
-    required String footer,
-    required bool dot,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainer.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: AppColors.surfaceContainerHigh),
-      ),
-      child: Column(
+  Widget _receivedCard(ThemeData theme, int received, int files) {
+    final l = context.l10n;
+    return _cardShell(
+      Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: AppColors.primary),
+              const Icon(
+                Icons.download_rounded,
+                size: 15,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  label,
+                  l.t('files.receivedTotal'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
                 ),
               ),
-              const Icon(
-                Icons.lock_outline_rounded,
-                size: 10,
+            ],
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              formatBytes(received),
+              style: inter(18, weight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(height: 9),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              l.t('files.filesCount', {'count': '$files'}),
+              style: inter(
+                10,
+                weight: FontWeight.w500,
                 color: AppColors.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cardShell(Widget child) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceContainer.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.surfaceContainerHigh),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _speedCard(ThemeData theme) {
+    final l = context.l10n;
+    final speed = (_lanSpeed / (1024 * 1024)).toStringAsFixed(1);
+    return _cardShell(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.speed_rounded,
+                size: 15,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  l.t('files.wifiSpeed'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(speed, style: inter(18, weight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 9),
+          Text(
+            'MB/s',
+            style: inter(
+              10,
+              weight: FontWeight.w500,
+              color: AppColors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _storageCard(
+    ThemeData theme,
+    ({int free, int total})? storage,
+    int used,
+    double percent,
+  ) {
+    final l = context.l10n;
+    return _cardShell(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.storage_rounded,
+                size: 15,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  l.t('files.storage'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(fontSize: 10.5),
+                ),
+              ),
+              Text(
+                storage == null ? '—' : '${(percent * 100).round()}%',
+                style: inter(
+                  10,
+                  weight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Text.rich(
             TextSpan(
-              text: value,
-              style: inter(16, weight: FontWeight.w700),
+              text: storage == null ? '—' : formatBytes(used),
+              style: inter(18, weight: FontWeight.w700),
               children: [
-                if (suffix.isNotEmpty)
-                  TextSpan(
-                    text: ' $suffix',
-                    style: inter(11, color: AppColors.onSurfaceVariant),
-                  ),
+                TextSpan(
+                  text: storage == null
+                      ? ''
+                      : ' / ${formatBytes(storage.total)}',
+                  style: inter(10.5, color: AppColors.onSurfaceVariant),
+                ),
               ],
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              if (dot) ...[
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 5),
-              ],
-              Expanded(
-                child: Text(
-                  footer,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: inter(
-                    10,
-                    weight: FontWeight.w500,
-                    color: AppColors.primary,
-                  ),
+          const SizedBox(height: 9),
+          SizedBox(
+            height: 12,
+            child: Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(
+                  value: storage == null ? 0 : percent,
+                  minHeight: 5,
+                  backgroundColor: AppColors.surfaceContainerHighest,
+                  color: AppColors.primary,
                 ),
               ),
-            ],
+            ),
           ),
         ],
       ),

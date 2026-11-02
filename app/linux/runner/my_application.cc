@@ -27,6 +27,44 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_decorated(window, TRUE);
   gtk_window_set_position(window, GTK_WIN_POS_CENTER);
 
+  // Client-side title bar so minimize/maximize stay visible on every
+  // Linux desktop environment (including tiling/Wayland sessions).
+  GtkWidget* header_bar = gtk_header_bar_new();
+  gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
+  gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(header_bar),
+                                       ":minimize,maximize,close");
+  gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), "Drople");
+  gtk_widget_show(header_bar);
+  gtk_window_set_titlebar(window, header_bar);
+
+  // Match the in-app dark surface (AppColors.background / onSurface).
+  GtkCssProvider* css = gtk_css_provider_new();
+  gtk_css_provider_load_from_data(
+      css,
+      "headerbar {"
+      "  background: #0A0E1A;"
+      "  background-image: none;"
+      "  color: #E0E8F0;"
+      "  border: none;"
+      "  box-shadow: none;"
+      "}"
+      "headerbar:backdrop { background: #0A0E1A; }"
+      "headerbar .title { color: #E0E8F0; font-weight: 600; }"
+      "headerbar button {"
+      "  background: transparent;"
+      "  background-image: none;"
+      "  border: none;"
+      "  box-shadow: none;"
+      "  color: #E0E8F0;"
+      "}"
+      "headerbar button:hover { background: #1A2438; }"
+      "headerbar button:active { background: #202C42; }",
+      -1, nullptr);
+  gtk_style_context_add_provider_for_screen(
+      gdk_screen_get_default(), GTK_STYLE_PROVIDER(css),
+      GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref(css);
+
   gtk_window_set_default_size(window, 1280, 720);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();

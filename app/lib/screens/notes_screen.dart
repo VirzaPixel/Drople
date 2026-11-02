@@ -152,14 +152,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       subtitle: favoriteCount > 0
                           ? '$countText · $favoriteText'
                           : countText,
-                      trailing: _localPill(theme),
                     ),
-                  ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  sliver: SliverToBoxAdapter(
-                    child: _localCard(theme, favoriteCount),
                   ),
                 ),
                 SliverPadding(
@@ -269,133 +262,6 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
-  Widget _localCard(ThemeData theme, int favorites) {
-    final l = context.l10n;
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceContainer.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.surfaceContainerHigh),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: const Icon(
-                  Icons.assignment_turned_in_outlined,
-                  size: 20,
-                  color: AppColors.primary,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l.t('notes.localTitle'),
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      l.t('notes.localMessage'),
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  l.t('notes.offline'),
-                  style: inter(
-                    10,
-                    weight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 11),
-          Container(
-            padding: const EdgeInsets.only(top: 9),
-            decoration: const BoxDecoration(
-              border: Border(
-                top: BorderSide(color: AppColors.surfaceContainerHigh),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.smartphone_rounded,
-                  size: 14,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '${l.t('notes.count', {'count': '${_notes.length}'})} · '
-                  '${l.t('notes.favoriteCount', {'count': '$favorites'})}',
-                  style: theme.textTheme.labelSmall,
-                ),
-                const Spacer(),
-                const Icon(
-                  Icons.cloud_off_rounded,
-                  size: 13,
-                  color: AppColors.onSurfaceVariant,
-                ),
-                const SizedBox(width: 4),
-                Text(l.t('notes.noCloud'), style: theme.textTheme.labelSmall),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _localPill(ThemeData theme) {
-    final l = context.l10n;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.smartphone_rounded,
-            size: 11,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(width: 5),
-          Text(
-            l.t('notes.local'),
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _filters(ThemeData theme) {
     final l = context.l10n;
     Widget chip(String label, _NoteFilter value) {
@@ -451,28 +317,6 @@ class _NotesScreenState extends State<NotesScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.2),
-                    ),
-                  ),
-                  child: Text(
-                    l.t('notes.local'),
-                    style: inter(
-                      10,
-                      weight: FontWeight.w500,
-                      color: theme.colorScheme.primary,
-                    ),
                   ),
                 ),
                 const SizedBox(width: 2),
@@ -546,7 +390,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 ),
                 const SizedBox(width: 5),
                 Text(
-                  l.t('notes.savedLocal'),
+                  l.t('notes.deviceThis'),
                   style: theme.textTheme.labelSmall,
                 ),
                 const Spacer(),
