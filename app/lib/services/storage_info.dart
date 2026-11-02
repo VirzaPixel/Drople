@@ -16,7 +16,12 @@ class StorageInfo {
       final free = await disk.getFreeDiskSpace;
       final total = await disk.getTotalDiskSpace;
       if (free == null || total == null || total <= 0) return null;
-      return (free: free.round(), total: total.round());
+      // disk_space_plus reports Android values in MB; normalize everything to bytes.
+      final bytesPerUnit = Platform.isAndroid ? 1024 * 1024 : 1;
+      return (
+        free: (free * bytesPerUnit).round(),
+        total: (total * bytesPerUnit).round(),
+      );
     } catch (_) {
       return null;
     }
