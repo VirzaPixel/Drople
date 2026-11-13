@@ -202,6 +202,20 @@ class L10n {
       'Connect a device first on the Devices tab',
     ),
     'files.sending': ('Mengirim {file} ke {peer}', 'Sending {file} to {peer}'),
+    'files.sendingMultiple': (
+      'Mengirim {count} file ke {peer}',
+      'Sending {count} files to {peer}',
+    ),
+    'files.dropHere': ('Lepaskan file untuk dikirim', 'Drop files here to send'),
+    'files.showInFolder': ('Buka lokasi file', 'Show in folder'),
+    'files.locationUnavailable': (
+      'Lokasi file tidak tersedia',
+      'File location is unavailable',
+    ),
+    'files.folderUnavailable': (
+      'File manager tidak tersedia',
+      'File manager is unavailable',
+    ),
     'files.startFailed': (
       'Gagal memulai pengiriman',
       'Failed to start transfer',

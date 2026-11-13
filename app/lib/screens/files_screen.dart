@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
 
 import '../l10n/l10n.dart';
 import '../models/file_transfer.dart';
@@ -36,6 +38,7 @@ class _FilesScreenState extends State<FilesScreen> {
   final Map<String, int> _lastTransferProgress = {};
   DateTime _lastSpeedAt = DateTime.now();
   String _lastSignature = '';
+  bool _isDraggingFiles = false;
   final TextEditingController _search = TextEditingController();
 
   @override
@@ -102,6 +105,14 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _pickAndSend() async {
+    final picked = await FilePicker.pickFiles();
+    if (picked.isEmpty) return;
+    final paths = picked.map((file) => file.path).whereType<String>().toList();
+    if (paths.isEmpty) return;
+    await _sendPaths(paths);
+  }
+
+  Future<void> _sendPaths(List<String> paths) async {
     final l = context.l10n;
     final peers = widget.network.listPeers().where((p) => p.connected).toList();
     if (peers.isEmpty) {
@@ -111,14 +122,43 @@ class _FilesScreenState extends State<FilesScreen> {
     final peer = await _choosePeer(peers);
     if (peer == null) return;
 
-    final file = await FilePicker.pickFile();
-    if (file == null || file.path == null) return;
-    try {
-      widget.files.sendFile(peer.id, file.path!);
-      _toast(l.t('files.sending', {'file': file.name, 'peer': peer.name}));
-      _load(silent: false);
-    } catch (_) {
+    var sent = 0;
+    for (final path in paths) {
+      try {
+        widget.files.sendFile(peer.id, path);
+        sent++;
+      } catch (_) {
+        // Keep sending remaining files if one file cannot be queued.
+      }
+    }
+    if (sent == 0) {
       _toast(l.t('files.startFailed'));
+    } else {
+      _toast(l.t('files.sendingMultiple', {
+        'count': '$sent',
+        'peer': peer.name,
+      }));
+      _load(silent: false);
+    }
+  }
+
+  Future<void> _showInFolder(FileTransferItem item) async {
+    final path = item.localPath;
+    if (path == null || path.trim().isEmpty || !File(path).existsSync()) {
+      _toast(context.l10n.t('files.locationUnavailable'));
+      return;
+    }
+    if (Platform.isWindows) {
+      await Process.start('explorer.exe', ['/select,', path]);
+    } else if (Platform.isMacOS) {
+      await Process.start('open', ['-R', path]);
+    } else if (Platform.isLinux) {
+      await Process.start('xdg-open', [File(path).parent.path]);
+    } else {
+      final result = await OpenFilex.open(File(path).parent.path);
+      if (result.type != ResultType.done) {
+        _toast(context.l10n.t('files.folderUnavailable'));
+      }
     }
   }
 
@@ -245,9 +285,26 @@ class _FilesScreenState extends State<FilesScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 900),
-            child: RefreshIndicator(
-              onRefresh: () async => _load(silent: false),
-              child: ListView(
+            child: DropTarget(
+              onDragEntered: (_) {
+                if (mounted) setState(() => _isDraggingFiles = true);
+              },
+              onDragExited: (_) {
+                if (mounted) setState(() => _isDraggingFiles = false);
+              },
+              onDragDone: (details) {
+                if (mounted) setState(() => _isDraggingFiles = false);
+                final paths = details.files
+                    .map((file) => file.path)
+                    .where((path) => path.isNotEmpty)
+                    .toList();
+                if (paths.isNotEmpty) _sendPaths(paths);
+              },
+              child: Stack(
+                children: [
+                  RefreshIndicator(
+                    onRefresh: () async => _load(silent: false),
+                    child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 children: [
                   SectionHeader(
@@ -303,6 +360,40 @@ class _FilesScreenState extends State<FilesScreen> {
                         child: StaggeredEntry(
                           index: i,
                           child: _transferCard(theme, visible[i]),
+                        ),
+                      ),
+                    ),
+                ],
+                    ),
+                  ),
+                  if (_isDraggingFiles)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.12,
+                            ),
+                            border: Border.all(
+                              color: theme.colorScheme.primary,
+                              width: 3,
+                            ),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          alignment: Alignment.center,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surface,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: Text(
+                                l.t('files.dropHere'),
+                                style: theme.textTheme.titleMedium,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -747,36 +838,55 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
           const SizedBox(width: 10),
           SizedBox(
-            width: 82,
+            width: 92,
             height: 36,
-            child: OutlinedButton(
-              onPressed: isDone ? () => _open(item) : null,
-              style: OutlinedButton.styleFrom(
-                padding: EdgeInsets.zero,
-                backgroundColor: isFailed
-                    ? AppColors.danger.withValues(alpha: 0.12)
-                    : AppColors.surfaceContainerLowest,
-                side: BorderSide(
-                  color: isFailed
-                      ? AppColors.danger.withValues(alpha: 0.3)
-                      : AppColors.surfaceContainerHigh,
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: isDone ? () => _open(item) : null,
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      backgroundColor: isFailed
+                          ? AppColors.danger.withValues(alpha: 0.12)
+                          : AppColors.surfaceContainerLowest,
+                      side: BorderSide(
+                        color: isFailed
+                            ? AppColors.danger.withValues(alpha: 0.3)
+                            : AppColors.surfaceContainerHigh,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: Text(
+                      actionLabel,
+                      style: inter(
+                        11,
+                        weight: FontWeight.w600,
+                        color: isFailed
+                            ? AppColors.danger
+                            : isDone
+                            ? AppColors.onSurface
+                            : AppColors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: Text(
-                actionLabel,
-                style: inter(
-                  11,
-                  weight: FontWeight.w600,
-                  color: isFailed
-                      ? AppColors.danger
-                      : isDone
-                      ? AppColors.onSurface
-                      : AppColors.onSurfaceVariant,
-                ),
-              ),
+                if (isDone && item.localPath != null) ...[
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: 34,
+                    child: IconButton(
+                      tooltip: l.t('files.showInFolder'),
+                      padding: EdgeInsets.zero,
+                      iconSize: 18,
+                      onPressed: () => _showInFolder(item),
+                      icon: const Icon(Icons.folder_open_outlined),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

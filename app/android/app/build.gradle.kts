@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.drople.drople"
-    compileSdk = flutter.compileSdkVersion
+    // desktop_drop depends on AndroidX libraries that require API 34 at compile time.
+    compileSdk = maxOf(flutter.compileSdkVersion, 34)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

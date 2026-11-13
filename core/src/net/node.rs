@@ -610,10 +610,6 @@ fn handle_swarm_event(
                         None,
                         None,
                     );
-                    if wire.manually_disconnected.contains(&peer_id) {
-                        continue;
-                    }
-                    let _ = swarm.dial(addr);
                 }
             }
             mdns::Event::Expired(list) => {
