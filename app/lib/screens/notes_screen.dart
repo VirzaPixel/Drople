@@ -351,6 +351,21 @@ class _NotesScreenState extends State<NotesScreen> {
                         : theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                IconButton(
+                  tooltip: l.t('notes.delete'),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  onPressed: () => _delete(note),
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 17,
+                    color: AppColors.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),

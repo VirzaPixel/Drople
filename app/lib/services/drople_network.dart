@@ -5,6 +5,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 
 import '../ffi/drople_bindings.dart';
 import '../models/peer.dart';
+import 'background_service.dart';
 
 /// Wrapper jaringan P2P. Satu instance global dipakai seluruh aplikasi agar
 /// koneksi peer tidak terputus saat berpindah halaman.
@@ -34,12 +35,14 @@ class DropleNetwork {
       throw StateError('drople_network_start gagal (kode $rc)');
     }
     _started = true;
+    await DropleBackgroundService.start();
   }
 
   Future<void> stop() async {
     if (!_started) return;
     _bindings.networkStop();
     _started = false;
+    await DropleBackgroundService.stop();
   }
 
   Future<String> _detectDeviceName() async {
@@ -101,10 +104,11 @@ class DropleNetwork {
 
   Future<void> connectPairing(String code) async {
     final trimmed = code.trim();
-    final shortCode = (trimmed.toUpperCase().startsWith('DRO1:')
-            ? trimmed.substring(5)
-            : trimmed)
-        .replaceAll(RegExp(r'[\s-]'), '');
+    final shortCode =
+        (trimmed.toUpperCase().startsWith('DRO1:')
+                ? trimmed.substring(5)
+                : trimmed)
+            .replaceAll(RegExp(r'[\s-]'), '');
     final shouldWaitForDiscovery = shortCode.length <= 10;
     final deadline = DateTime.now().add(const Duration(seconds: 12));
     while (true) {
@@ -152,4 +156,14 @@ class DropleNetwork {
   Future<void> addRelay(String addr) async {
     _bindings.addRelay(addr);
   }
+
+  /// Diagnostik koneksi: info peer lokal, alamat listen, dan state peer.
+  NetworkDiagnostics diagnostics() {
+    final data =
+        jsonDecode(_bindings.networkDiagnosticsJson()) as Map<String, dynamic>;
+    return NetworkDiagnostics.fromJson(data);
+  }
+
+  /// Menghubungkan langsung ke multiaddr (mode Wireless Debugging).
+  void dialAddr(String addr) => _bindings.networkDialAddr(addr);
 }

@@ -473,31 +473,74 @@ pub fn set_file_transfer_local_path(conn: &Connection, id: &str, local_path: &st
     Ok(())
 }
 
+pub fn is_terminal_transfer_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "cancelled")
+}
+
 pub fn update_file_transfer_status(conn: &Connection, id: &str, status: &str) -> Result<()> {
+    let current = conn
+        .query_row(
+            "SELECT status FROM file_transfers WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(current) = current else {
+        return Err(DropleError::NotFound);
+    };
+    // Status terminal (selesai/gagal/dibatalkan) tidak boleh berubah lagi.
+    // Ini mencegah transfer yang sudah gagal tampil kembali sebagai "active".
+    if is_terminal_transfer_status(&current) {
+        return Ok(());
+    }
     let now = now_millis();
-    let completed = matches!(status, "completed" | "failed" | "cancelled");
-    let affected = conn.execute(
+    let completed = is_terminal_transfer_status(status);
+    conn.execute(
         "UPDATE file_transfers
          SET status = ?2,
              completed_at = CASE WHEN ?3 THEN ?4 ELSE completed_at END
          WHERE id = ?1",
         params![id, status, completed as i64, now],
     )?;
-    if affected == 0 {
-        return Err(DropleError::NotFound);
-    }
     Ok(())
 }
 
 pub fn update_file_transfer_progress(conn: &Connection, id: &str, progress: i64) -> Result<()> {
     let affected = conn.execute(
-        "UPDATE file_transfers SET progress = ?2 WHERE id = ?1",
+        "UPDATE file_transfers
+         SET progress = ?2
+         WHERE id = ?1 AND status NOT IN ('completed', 'failed', 'cancelled')",
         params![id, progress],
     )?;
     if affected == 0 {
-        return Err(DropleError::NotFound);
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM file_transfers WHERE id = ?1",
+                params![id],
+                |_| Ok(()),
+            )
+            .optional()?;
+        if exists.is_none() {
+            return Err(DropleError::NotFound);
+        }
     }
     Ok(())
+}
+
+/// Menandai semua transfer yang masih aktif sebagai gagal.
+///
+/// Dipakai saat core dimulai ulang atau jaringan dihentikan. State transfer
+/// hanya hidup di memori proses, sehingga baris `pending`/`active` yang
+/// tersisa tidak akan pernah berlanjut dan harus ditutup sebagai `failed`.
+pub fn fail_stale_file_transfers(conn: &Connection) -> Result<usize> {
+    let now = now_millis();
+    let affected = conn.execute(
+        "UPDATE file_transfers
+         SET status = 'failed', completed_at = ?1
+         WHERE status IN ('pending', 'active')",
+        params![now],
+    )?;
+    Ok(affected)
 }
 
 pub fn list_file_transfers(conn: &Connection) -> Result<Vec<FileTransferView>> {
@@ -527,6 +570,11 @@ pub fn list_file_transfers(conn: &Connection) -> Result<Vec<FileTransferView>> {
         transfers.push(row?);
     }
     Ok(transfers)
+}
+
+pub fn delete_file_transfer(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM file_transfers WHERE id = ?1", params![id])?;
+    Ok(())
 }
 
 pub fn get_file_transfer(conn: &Connection, id: &str) -> Result<FileTransferView> {

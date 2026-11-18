@@ -134,10 +134,9 @@ class _FilesScreenState extends State<FilesScreen> {
     if (sent == 0) {
       _toast(l.t('files.startFailed'));
     } else {
-      _toast(l.t('files.sendingMultiple', {
-        'count': '$sent',
-        'peer': peer.name,
-      }));
+      _toast(
+        l.t('files.sendingMultiple', {'count': '$sent', 'peer': peer.name}),
+      );
       _load(silent: false);
     }
   }
@@ -156,7 +155,7 @@ class _FilesScreenState extends State<FilesScreen> {
       await Process.start('xdg-open', [File(path).parent.path]);
     } else {
       final result = await OpenFilex.open(File(path).parent.path);
-      if (result.type != ResultType.done) {
+      if (result.type != ResultType.done && mounted) {
         _toast(context.l10n.t('files.folderUnavailable'));
       }
     }
@@ -183,6 +182,7 @@ class _FilesScreenState extends State<FilesScreen> {
   IconData _fileIcon(FileTransferItem item) {
     final name = item.fileName.toLowerCase();
     if (item.isFailed) return Icons.error_outline_rounded;
+    if (item.isCancelled) return Icons.cancel_outlined;
     if (name.endsWith('.jpg') ||
         name.endsWith('.jpeg') ||
         name.endsWith('.png') ||
@@ -260,6 +260,43 @@ class _FilesScreenState extends State<FilesScreen> {
     if (error.isNotEmpty) _toast(error);
   }
 
+  Future<void> _cancel(FileTransferItem item) async {
+    final l = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.l10n.t('files.cancelTitle')),
+        content: Text(
+          ctx.l10n.t(
+            item.isSend
+                ? 'files.cancelSendMessage'
+                : 'files.cancelReceiveMessage',
+            {'file': item.fileName},
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.l10n.t('files.cancelKeep')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: Text(ctx.l10n.t('files.cancelAction')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      widget.files.cancelTransfer(item.id);
+      _toast(l.t('files.cancelledToast'));
+      _load(silent: false);
+    } catch (_) {
+      _toast(l.t('files.cancelFailed'));
+    }
+  }
+
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -305,65 +342,71 @@ class _FilesScreenState extends State<FilesScreen> {
                   RefreshIndicator(
                     onRefresh: () async => _load(silent: false),
                     child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-                children: [
-                  SectionHeader(
-                    title: l.t('files.title'),
-                    subtitle: l.t('files.subtitle'),
-                  ),
-                  _actionRow(),
-                  const SizedBox(height: 12),
-                  _statsRow(theme),
-                  const SizedBox(height: 12),
-                  _tabs(theme),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _search,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: l.t('files.searchHint'),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                      suffixIcon: _search.text.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 18),
-                              onPressed: () {
-                                _search.clear();
-                                setState(() {});
-                              },
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  if (visible.isEmpty)
-                    EmptyState(
-                      icon: Icons.folder_open_rounded,
-                      title: _search.text.trim().isEmpty
-                          ? l.t('files.emptyTitle')
-                          : l.t('files.emptySearch'),
-                      message: _search.text.trim().isEmpty
-                          ? l.t('files.emptyMessage')
-                          : l.t('files.searchMessage'),
-                      action: _search.text.trim().isEmpty
-                          ? FilledButton.icon(
-                              onPressed: _pickAndSend,
-                              icon: const Icon(Icons.upload_file_rounded),
-                              label: Text(l.t('files.pickFile')),
-                            )
-                          : null,
-                    )
-                  else
-                    ...List.generate(
-                      visible.length,
-                      (i) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: StaggeredEntry(
-                          index: i,
-                          child: _transferCard(theme, visible[i]),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                      children: [
+                        SectionHeader(
+                          title: l.t('files.title'),
+                          subtitle: l.t('files.subtitle'),
                         ),
-                      ),
-                    ),
-                ],
+                        _actionRow(),
+                        const SizedBox(height: 12),
+                        _statsRow(theme),
+                        const SizedBox(height: 12),
+                        _tabs(theme),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            hintText: l.t('files.searchHint'),
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              size: 19,
+                            ),
+                            suffixIcon: _search.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 18,
+                                    ),
+                                    onPressed: () {
+                                      _search.clear();
+                                      setState(() {});
+                                    },
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        if (visible.isEmpty)
+                          EmptyState(
+                            icon: Icons.folder_open_rounded,
+                            title: _search.text.trim().isEmpty
+                                ? l.t('files.emptyTitle')
+                                : l.t('files.emptySearch'),
+                            message: _search.text.trim().isEmpty
+                                ? l.t('files.emptyMessage')
+                                : l.t('files.searchMessage'),
+                            action: _search.text.trim().isEmpty
+                                ? FilledButton.icon(
+                                    onPressed: _pickAndSend,
+                                    icon: const Icon(Icons.upload_file_rounded),
+                                    label: Text(l.t('files.pickFile')),
+                                  )
+                                : null,
+                          )
+                        else
+                          ...List.generate(
+                            visible.length,
+                            (i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: StaggeredEntry(
+                                index: i,
+                                child: _transferCard(theme, visible[i]),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   if (_isDraggingFiles)
@@ -737,10 +780,11 @@ class _FilesScreenState extends State<FilesScreen> {
 
   Widget _transferCard(ThemeData theme, FileTransferItem item) {
     final l = context.l10n;
-    final isActive = item.status == 'active' || item.status == 'pending';
+    final isActive = item.isActive;
     final isDone = item.isCompleted;
     final isFailed = item.isFailed;
-    final accent = isFailed
+    final isCancelled = item.isCancelled;
+    final accent = isFailed || isCancelled
         ? AppColors.danger
         : isDone
         ? AppColors.primary
@@ -751,6 +795,8 @@ class _FilesScreenState extends State<FilesScreen> {
     final String meta;
     if (isFailed) {
       meta = l.t('files.failedMeta', {'size': formatBytes(item.fileSize)});
+    } else if (isCancelled) {
+      meta = l.t('files.cancelledMeta', {'size': formatBytes(item.fileSize)});
     } else if (isDone) {
       meta = '${formatBytes(item.fileSize)} • $direction $peer';
     } else {
@@ -763,13 +809,16 @@ class _FilesScreenState extends State<FilesScreen> {
       actionLabel = l.t('files.open');
     } else if (isFailed) {
       actionLabel = l.t('files.failed');
+    } else if (isCancelled) {
+      actionLabel = l.t('files.cancelled');
     } else {
       actionLabel = l.t('files.processing');
     }
+    final failedStyle = isFailed || isCancelled;
 
     return AppCard(
       padding: const EdgeInsets.all(12),
-      color: isFailed ? AppColors.danger.withValues(alpha: 0.06) : null,
+      color: failedStyle ? AppColors.danger.withValues(alpha: 0.06) : null,
       onTap: isDone ? () => _open(item) : null,
       child: Row(
         children: [
@@ -777,7 +826,7 @@ class _FilesScreenState extends State<FilesScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: isFailed
+              color: failedStyle
                   ? AppColors.danger.withValues(alpha: 0.14)
                   : AppColors.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(11),
@@ -785,7 +834,7 @@ class _FilesScreenState extends State<FilesScreen> {
             child: Icon(
               _fileIcon(item),
               size: 20,
-              color: isFailed ? AppColors.danger : AppColors.primary,
+              color: failedStyle ? AppColors.danger : AppColors.primary,
             ),
           ),
           const SizedBox(width: 12),
@@ -807,7 +856,7 @@ class _FilesScreenState extends State<FilesScreen> {
                   style: inter(
                     10.5,
                     weight: FontWeight.w500,
-                    color: isFailed
+                    color: failedStyle
                         ? AppColors.danger
                         : AppColors.onSurfaceVariant,
                   ),
@@ -838,56 +887,74 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
           const SizedBox(width: 10),
           SizedBox(
-            width: 92,
+            width: isActive ? 86 : 92,
             height: 36,
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: isDone ? () => _open(item) : null,
+            child: isActive
+                ? OutlinedButton.icon(
+                    onPressed: () => _cancel(item),
+                    icon: const Icon(Icons.close_rounded, size: 15),
+                    label: Text(l.t('files.cancelAction')),
                     style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      backgroundColor: isFailed
-                          ? AppColors.danger.withValues(alpha: 0.12)
-                          : AppColors.surfaceContainerLowest,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      foregroundColor: AppColors.danger,
+                      backgroundColor: AppColors.surfaceContainerLowest,
                       side: BorderSide(
-                        color: isFailed
-                            ? AppColors.danger.withValues(alpha: 0.3)
-                            : AppColors.surfaceContainerHigh,
+                        color: AppColors.danger.withValues(alpha: 0.45),
                       ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
+                      textStyle: inter(11, weight: FontWeight.w600),
                     ),
-                    child: Text(
-                      actionLabel,
-                      style: inter(
-                        11,
-                        weight: FontWeight.w600,
-                        color: isFailed
-                            ? AppColors.danger
-                            : isDone
-                            ? AppColors.onSurface
-                            : AppColors.onSurfaceVariant,
+                  )
+                : Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: isDone ? () => _open(item) : null,
+                          style: OutlinedButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            backgroundColor: failedStyle
+                                ? AppColors.danger.withValues(alpha: 0.12)
+                                : AppColors.surfaceContainerLowest,
+                            side: BorderSide(
+                              color: failedStyle
+                                  ? AppColors.danger.withValues(alpha: 0.3)
+                                  : AppColors.surfaceContainerHigh,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            actionLabel,
+                            style: inter(
+                              11,
+                              weight: FontWeight.w600,
+                              color: failedStyle
+                                  ? AppColors.danger
+                                  : isDone
+                                  ? AppColors.onSurface
+                                  : AppColors.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      if (isDone && item.localPath != null) ...[
+                        const SizedBox(width: 2),
+                        SizedBox(
+                          width: 34,
+                          child: IconButton(
+                            tooltip: l.t('files.showInFolder'),
+                            padding: EdgeInsets.zero,
+                            iconSize: 18,
+                            onPressed: () => _showInFolder(item),
+                            icon: const Icon(Icons.folder_open_outlined),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ),
-                if (isDone && item.localPath != null) ...[
-                  const SizedBox(width: 2),
-                  SizedBox(
-                    width: 34,
-                    child: IconButton(
-                      tooltip: l.t('files.showInFolder'),
-                      padding: EdgeInsets.zero,
-                      iconSize: 18,
-                      onPressed: () => _showInFolder(item),
-                      icon: const Icon(Icons.folder_open_outlined),
-                    ),
-                  ),
-                ],
-              ],
-            ),
           ),
         ],
       ),

@@ -33,6 +33,10 @@ pub fn start() -> Result<()> {
         return Ok(());
     }
 
+    // Transfer hanya hidup selama proses berjalan. Baris yang masih
+    // pending/active dari sesi sebelumnya tidak mungkin dilanjutkan lagi.
+    let _ = with_engine(|e| db::fail_stale_file_transfers(&e.conn));
+
     let keypair = identity::load_or_create()?;
     let db_path = with_engine(|e| Ok(e.path.clone()))?;
     let device_name = with_engine(|e| db::get_setting(&e.conn, DEVICE_NAME_SETTING))?
@@ -47,10 +51,14 @@ pub fn start() -> Result<()> {
 }
 
 pub fn stop() {
+    let was_running = is_running();
     if let Ok(mut guard) = slot().lock() {
         if let Some(handle) = guard.take() {
             handle.stop();
         }
+    }
+    if was_running {
+        let _ = with_engine(|e| db::fail_stale_file_transfers(&e.conn));
     }
 }
 
@@ -114,6 +122,85 @@ pub fn pending_approvals_json() -> Result<String> {
         None => Vec::new(),
     };
     Ok(serde_json::to_string(&requests)?)
+}
+
+pub fn pending_file_offers_json() -> Result<String> {
+    let guard = lock()?;
+    let offers = match guard.as_ref() {
+        Some(handle) => handle
+            .snapshot()
+            .pending_file_offers
+            .into_values()
+            .collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+    Ok(serde_json::to_string(&offers)?)
+}
+
+pub fn approve_file_offer(transfer_id: &str) -> Result<()> {
+    handle_with(|handle| {
+        handle.approve_file_offer(transfer_id);
+        Ok(())
+    })
+}
+
+pub fn reject_file_offer(transfer_id: &str) -> Result<()> {
+    handle_with(|handle| {
+        handle.reject_file_offer(transfer_id);
+        Ok(())
+    })
+}
+
+pub fn cancel_transfer(transfer_id: &str) -> Result<()> {
+    if !is_running() {
+        return Err(DropleError::NotConnected);
+    }
+    handle_with(|handle| {
+        handle.cancel_transfer(transfer_id);
+        Ok(())
+    })
+}
+
+/// Menghubungkan langsung ke alamat multiaddr (mode diagnostik wireless).
+pub fn dial_addr(addr: &str) -> Result<()> {
+    let addr = addr.trim();
+    if addr.is_empty() {
+        return Err(DropleError::InvalidInput("alamat kosong".into()));
+    }
+    addr.parse::<libp2p::Multiaddr>()
+        .map_err(|e| DropleError::InvalidInput(format!("alamat tidak valid: {e}")))?;
+    handle_with(|handle| {
+        handle.dial_addr(addr);
+        Ok(())
+    })
+}
+
+/// Ringkasan diagnostik koneksi untuk panel Wireless Debugging.
+pub fn diagnostics_json() -> Result<String> {
+    let guard = lock()?;
+    let value = match guard.as_ref() {
+        Some(handle) => {
+            let state = handle.snapshot();
+            let peers: Vec<_> = state.peers.values().cloned().collect();
+            serde_json::json!({
+                "running": true,
+                "peer_id": state.local_peer_id,
+                "code": state.local_code,
+                "fingerprint": state.local_fingerprint,
+                "listen_addrs": state.listen_addrs,
+                "peers": peers,
+            })
+        }
+        None => serde_json::json!({
+            "running": false,
+            "peer_id": "",
+            "code": "",
+            "fingerprint": "",
+            "listen_addrs": [],
+            "peers": [],
+        }),
+    };
+    Ok(value.to_string())
 }
 
 pub fn pairing_notifications_json() -> Result<String> {

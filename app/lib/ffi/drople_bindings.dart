@@ -401,6 +401,11 @@ class DropleBindings {
   void addRelay(String addr) =>
       _callWithString('drople_network_add_relay', addr);
 
+  void networkDialAddr(String addr) =>
+      _callWithString('drople_network_dial_addr', addr);
+
+  String networkDiagnosticsJson() => _stringOut('drople_network_diagnostics');
+
   // -------------------------------------------------------------------------
   // File Transfer
   // -------------------------------------------------------------------------
@@ -470,6 +475,16 @@ class DropleBindings {
       malloc.free(p);
     }
   }
+
+  void fileCancel(String id) => _callWithString('drople_file_cancel', id);
+
+  String filePendingOffersJson() => _stringOut('drople_file_pending_offers');
+
+  void fileApproveOffer(String transferId) =>
+      _callWithString('drople_file_approve', transferId);
+
+  void fileRejectOffer(String transferId) =>
+      _callWithString('drople_file_reject', transferId);
 
   // -------------------------------------------------------------------------
   // Google Drive & Backup

@@ -28,6 +28,9 @@ pub enum WireMessage {
     FileDone {
         transfer_id: String,
     },
+    FileCancel {
+        transfer_id: String,
+    },
     Ack {
         ok: bool,
         message: String,

@@ -334,6 +334,23 @@ pub extern "C" fn drople_pairing_connect(code: *const c_char) -> c_int {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn drople_network_dial_addr(addr: *const c_char) -> c_int {
+    let addr = match cstr_to_string(addr) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| crate::net::dial_addr(&addr))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_network_diagnostics(out_json: *mut *mut c_char) -> c_int {
+    run(|| {
+        let json = crate::net::diagnostics_json()?;
+        write_out(out_json, json)
+    })
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn drople_network_add_relay(addr: *const c_char) -> c_int {
     let addr = match cstr_to_string(addr) {
         Ok(v) => v,
@@ -416,6 +433,41 @@ pub extern "C" fn drople_file_transfer_status(
         let status = crate::file::file_transfer_status(&id)?;
         write_out(out_status, status)
     })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_file_cancel(id: *const c_char) -> c_int {
+    let id = match cstr_to_string(id) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| crate::file::file_cancel(&id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_file_pending_offers(out_json: *mut *mut c_char) -> c_int {
+    run(|| {
+        let json = crate::net::pending_file_offers_json()?;
+        write_out(out_json, json)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_file_approve(transfer_id: *const c_char) -> c_int {
+    let transfer_id = match cstr_to_string(transfer_id) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| crate::net::approve_file_offer(&transfer_id))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn drople_file_reject(transfer_id: *const c_char) -> c_int {
+    let transfer_id = match cstr_to_string(transfer_id) {
+        Ok(v) => v,
+        Err(e) => return e.code(),
+    };
+    run(|| crate::net::reject_file_offer(&transfer_id))
 }
 
 // ---------------------------------------------------------------------------

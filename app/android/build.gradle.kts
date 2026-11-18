@@ -15,6 +15,17 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
+// Plugin Flutter (mis. desktop_drop) default ke compileSdk 33, sementara
+// dependency AndroidX terbaru mensyaratkan 34+. Samakan compileSdk plugin.
+subprojects {
+    afterEvaluate {
+        val androidExt = extensions.findByName("android")
+        if (androidExt is com.android.build.gradle.BaseExtension) {
+            androidExt.compileSdkVersion(36)
+        }
+    }
+}
 subprojects {
     project.evaluationDependsOn(":app")
 }

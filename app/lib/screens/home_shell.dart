@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../l10n/l10n.dart';
+import '../models/file_transfer.dart';
 import '../services/drople_core.dart';
 import '../services/drople_file.dart';
 import '../services/drople_network.dart';
@@ -32,6 +34,9 @@ class _HomeShellState extends State<HomeShell> {
   String? _error;
   bool _networkWarning = false;
   DateTime _splashStartedAt = DateTime.now();
+  Timer? _offerTicker;
+  bool _offerDialogOpen = false;
+  final Set<String> _handledOffers = <String>{};
   static const _minimumSplashDuration = Duration(milliseconds: 1150);
 
   static const _destinations = [
@@ -75,6 +80,7 @@ class _HomeShellState extends State<HomeShell> {
       await _holdSplashVisible();
       if (!mounted) return;
       setState(() => _ready = true);
+      _startOfferWatcher();
     } catch (e) {
       await _holdSplashVisible();
       if (!mounted) return;
@@ -85,9 +91,87 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  void _startOfferWatcher() {
+    _offerTicker ??= Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _checkFileOffers(),
+    );
+  }
+
+  /// Menampilkan permintaan transfer masuk. File tidak akan dikirim sebelum
+  /// pengguna di perangkat penerima menyetujuinya.
+  Future<void> _checkFileOffers() async {
+    if (!mounted || _offerDialogOpen) return;
+    final List<PendingFileOffer> offers;
+    try {
+      offers = _files.pendingOffers();
+    } catch (_) {
+      return;
+    }
+    final activeIds = offers.map((offer) => offer.transferId).toSet();
+    _handledOffers.removeWhere((id) => !activeIds.contains(id));
+    final pending = offers
+        .where((offer) => !_handledOffers.contains(offer.transferId))
+        .toList();
+    if (pending.isEmpty) return;
+
+    _offerDialogOpen = true;
+    final offer = pending.first;
+    _handledOffers.add(offer.transferId);
+    final l = context.l10n;
+    final device = offer.peerName.trim().isEmpty
+        ? l.t('peers.unnamed')
+        : offer.peerName.trim();
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.download_rounded),
+        title: Text(ctx.l10n.t('files.incomingTitle')),
+        content: Text(
+          ctx.l10n.t('files.incomingMessage', {
+            'device': device,
+            'file': offer.fileName,
+            'size': formatBytes(offer.fileSize),
+          }),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.l10n.t('files.reject')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ctx.l10n.t('files.accept')),
+          ),
+        ],
+      ),
+    );
+    try {
+      if (accepted == true) {
+        _files.approveOffer(offer.transferId);
+      } else {
+        _files.rejectOffer(offer.transferId);
+      }
+    } catch (_) {}
+    _offerDialogOpen = false;
+    if (!mounted) return;
+    _showToast(
+      accepted == true
+          ? l.t('files.incomingAccepted')
+          : l.t('files.incomingRejected'),
+    );
+  }
+
+  void _showToast(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _holdSplashVisible() async {
-    final remaining = _minimumSplashDuration -
-        DateTime.now().difference(_splashStartedAt);
+    final remaining =
+        _minimumSplashDuration - DateTime.now().difference(_splashStartedAt);
     if (remaining > Duration.zero) await Future<void>.delayed(remaining);
   }
 
@@ -209,6 +293,12 @@ class _HomeShellState extends State<HomeShell> {
         );
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _offerTicker?.cancel();
+    super.dispose();
   }
 
   Widget _warningBanner(BuildContext context) {

@@ -40,7 +40,9 @@ class DropleFile {
     }
     final result = await OpenFilex.open(path);
     if (result.type == ResultType.done) return '';
-    return result.message.isEmpty ? 'Tidak ada aplikasi pembuka' : result.message;
+    return result.message.isEmpty
+        ? 'Tidak ada aplikasi pembuka'
+        : result.message;
   }
 
   /// Mengambil daftar semua transfer file (riwayat + aktif).
@@ -52,8 +54,27 @@ class DropleFile {
         .toList();
   }
 
-  /// Mengambil status transfer tertentu ('pending'|'active'|'completed'|'failed').
+  /// Mengambil status transfer tertentu ('pending'|'active'|'completed'|'failed'|'cancelled').
   String transferStatus(String transferId) {
     return _bindings.fileTransferStatus(transferId);
   }
+
+  /// Membatalkan transfer yang masih berjalan.
+  void cancelTransfer(String transferId) {
+    _bindings.fileCancel(transferId);
+  }
+
+  /// Daftar penawaran transfer yang menunggu persetujuan pengguna.
+  List<PendingFileOffer> pendingOffers() {
+    final raw = _bindings.filePendingOffersJson();
+    final data = jsonDecode(raw) as List<dynamic>;
+    return data
+        .map((e) => PendingFileOffer.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  void approveOffer(String transferId) =>
+      _bindings.fileApproveOffer(transferId);
+
+  void rejectOffer(String transferId) => _bindings.fileRejectOffer(transferId);
 }

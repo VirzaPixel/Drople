@@ -32,6 +32,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   bool _favorite = false;
   bool _dirty = false;
   bool _saved = false;
+  bool _deleted = false;
   String? _noteId;
 
   @override
@@ -53,7 +54,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   }
 
   void _markDirty() {
-    if (_dirty) return;
+    if (_deleted || _dirty) return;
     _dirty = true;
     _saved = false;
     _autoSave?.cancel();
@@ -61,6 +62,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   }
 
   void _save() {
+    if (_deleted) return;
     final title = _title.text.trim();
     final content = _content.text;
     if (title.isEmpty && content.trim().isEmpty) return;
@@ -85,6 +87,51 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _autoSave?.cancel();
     if (_dirty) _save();
     _dirty = false;
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _delete() async {
+    final id = _noteId;
+    if (id == null) return;
+    final l = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.l10n.t('notes.deleteTitle')),
+        content: Text(
+          _title.text.trim().isEmpty
+              ? ctx.l10n.t('notes.untitledNote')
+              : _title.text.trim(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.l10n.t('notes.cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: Text(ctx.l10n.t('notes.delete')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    _autoSave?.cancel();
+    _deleted = true;
+    _dirty = false;
+    try {
+      widget.core.deleteNote(id);
+      widget.onSaved();
+    } catch (_) {
+      _deleted = false;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(l.t('notes.deleteFailed'))));
+      return;
+    }
     if (!mounted) return;
     Navigator.of(context).pop();
   }
@@ -255,6 +302,15 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           ),
           title: Text(isNew ? l.t('editor.new') : l.t('editor.edit')),
           actions: [
+            if (!isNew)
+              IconButton(
+                tooltip: l.t('editor.delete'),
+                onPressed: _delete,
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: AppColors.danger,
+                ),
+              ),
             IconButton(
               tooltip: _favorite
                   ? l.t('editor.favoriteOn')

@@ -89,6 +89,23 @@ pub fn file_transfer_status(id: &str) -> Result<String> {
     Ok(status)
 }
 
+/// Membatalkan transfer file yang sedang berjalan (kirim maupun terima).
+pub fn file_cancel(id: &str) -> Result<()> {
+    let status = with_engine(|e| db::get_file_transfer_status(&e.conn, id))?;
+    if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+        return Ok(());
+    }
+
+    // Hentikan state jaringan lebih dulu (jika ada) agar tidak ada chunk baru
+    // yang dikirim setelah status dibatalkan.
+    if crate::net::is_running() {
+        let _ = crate::net::cancel_transfer(id);
+    }
+
+    with_engine(|e| db::update_file_transfer_status(&e.conn, id, "cancelled"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

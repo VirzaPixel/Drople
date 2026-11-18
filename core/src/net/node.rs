@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -31,6 +31,16 @@ use crate::sync;
 pub const WIRE_PROTOCOL: &str = "/drople/wire/1";
 pub const RECEIVE_DIR_SETTING: &str = "file_receive_dir";
 
+/// Batas waktu transfer yang kehilangan koneksi sebelum ditandai gagal.
+const TRANSFER_DISCONNECT_GRACE: Duration = Duration::from_secs(15);
+/// Batas waktu transfer yang terhubung tetapi tidak ada aktivitas, lalu dicoba
+/// dilanjutkan otomatis.
+const TRANSFER_IDLE_RESUME: Duration = Duration::from_secs(12);
+/// Batas umur permintaan transfer masuk yang belum dijawab pengguna.
+const PENDING_OFFER_TTL: Duration = Duration::from_secs(110);
+/// Jumlah maksimum percobaan ulang request yang gagal sebelum ditandai gagal.
+const MAX_TRANSFER_ATTEMPTS: u32 = 5;
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PeerEntry {
     pub id: String,
@@ -48,6 +58,18 @@ pub struct PeerEntry {
     pub platform: String,
 }
 
+/// Permintaan transfer file yang menunggu persetujuan pengguna.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PendingFileOffer {
+    pub transfer_id: String,
+    pub peer_id: String,
+    pub peer_name: String,
+    pub file_name: String,
+    pub file_size: i64,
+    pub file_hash: String,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SharedState {
     pub local_peer_id: String,
@@ -56,6 +78,7 @@ pub struct SharedState {
     pub listen_addrs: Vec<String>,
     pub peers: BTreeMap<String, PeerEntry>,
     pub pending_approvals: BTreeMap<String, String>,
+    pub pending_file_offers: BTreeMap<String, PendingFileOffer>,
     pub rejected_peers: std::collections::HashSet<String>,
     pub pairing_notifications: Vec<(String, bool)>,
 }
@@ -83,6 +106,9 @@ enum NetworkCommand {
     DisconnectPeer(String),
     ApprovePeer(String),
     RejectPeer(String),
+    CancelTransfer(String),
+    ApproveFile(String),
+    RejectFile(String),
     Shutdown,
 }
 
@@ -106,14 +132,28 @@ struct OutboundTransfer {
     chunks: Vec<chunking::FileChunk>,
     next_index: usize,
     offer_acked: bool,
+    last_activity: Instant,
+    attempts: u32,
 }
 
 struct IncomingTransfer {
+    peer: PeerId,
     file: File,
+    path: PathBuf,
     hasher: Sha256,
     expected_hash: String,
     written: i64,
     received: std::collections::HashSet<u32>,
+    last_activity: Instant,
+}
+
+struct PendingOffer {
+    peer: PeerId,
+    file_name: String,
+    file_size: i64,
+    file_hash: String,
+    channel: request_response::ResponseChannel<WireMessage>,
+    created: Instant,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -133,6 +173,7 @@ struct WireState {
     outbound: HashMap<String, OutboundTransfer>,
     pending: HashMap<request_response::OutboundRequestId, PendingAction>,
     incoming: HashMap<String, IncomingTransfer>,
+    pending_offers: HashMap<String, PendingOffer>,
     pairing_outbound: std::collections::HashSet<PeerId>,
     pairing_requests: HashMap<request_response::OutboundRequestId, PeerId>,
     pairing_inbound: HashMap<String, request_response::ResponseChannel<WireMessage>>,
@@ -229,6 +270,24 @@ impl NodeHandle {
             .send_blocking(NetworkCommand::RejectPeer(peer_id.to_string()));
     }
 
+    pub fn approve_file_offer(&self, transfer_id: &str) {
+        let _ = self
+            .cmd_tx
+            .send_blocking(NetworkCommand::ApproveFile(transfer_id.to_string()));
+    }
+
+    pub fn reject_file_offer(&self, transfer_id: &str) {
+        let _ = self
+            .cmd_tx
+            .send_blocking(NetworkCommand::RejectFile(transfer_id.to_string()));
+    }
+
+    pub fn cancel_transfer(&self, transfer_id: &str) {
+        let _ = self
+            .cmd_tx
+            .send_blocking(NetworkCommand::CancelTransfer(transfer_id.to_string()));
+    }
+
     pub fn stop(self) {
         let _ = self.cmd_tx.send_blocking(NetworkCommand::Shutdown);
     }
@@ -321,10 +380,15 @@ async fn run(
         .and_then(|p| Connection::open(p).ok());
 
     let mut wire = WireState::default();
+    let mut watchdog = tokio::time::interval(Duration::from_secs(1));
+    watchdog.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let _ = ready_tx.send(Ok(()));
 
     loop {
         tokio::select! {
+            _ = watchdog.tick() => {
+                file_watchdog(&mut swarm, &mut wire, &db_conn, &shared);
+            }
             event = swarm.select_next_some() => {
                 handle_swarm_event(
                     event,
@@ -345,6 +409,13 @@ async fn run(
                     }
                     Ok(NetworkCommand::DialAddr(addr)) => {
                         if let Ok(addr) = addr.parse::<Multiaddr>() {
+                            if let Some(Protocol::P2p(peer_id)) = addr.iter().last() {
+                                wire.manually_disconnected.remove(&peer_id);
+                                if let Ok(mut state) = shared.lock() {
+                                    state.rejected_peers.remove(&peer_id.to_string());
+                                }
+                                wire.pairing_outbound.insert(peer_id);
+                            }
                             let _ = swarm.dial(addr);
                         }
                     }
@@ -386,6 +457,7 @@ async fn run(
                             wire.manually_disconnected.insert(peer);
                             let _ = swarm.disconnect_peer_id(peer);
                             set_connected(&shared, &db_conn, &peer, false);
+                            fail_peer_transfers(&mut wire, &db_conn, &peer);
                         }
                     }
                     Ok(NetworkCommand::ApprovePeer(peer_id)) => {
@@ -411,6 +483,27 @@ async fn run(
                                 WireMessage::PairingResult { accepted: false },
                             );
                         }
+                    }
+                    Ok(NetworkCommand::CancelTransfer(transfer_id)) => {
+                        cancel_transfer(
+                            &mut swarm,
+                            &mut wire,
+                            &db_conn,
+                            &shared,
+                            &transfer_id,
+                        );
+                    }
+                    Ok(NetworkCommand::ApproveFile(transfer_id)) => {
+                        approve_file_offer(
+                            &mut swarm,
+                            &mut wire,
+                            &db_conn,
+                            &shared,
+                            &transfer_id,
+                        );
+                    }
+                    Ok(NetworkCommand::RejectFile(transfer_id)) => {
+                        reject_file_offer(&mut swarm, &mut wire, &shared, &transfer_id);
                     }
                     Ok(NetworkCommand::Shutdown) | Err(_) => break,
                 }
@@ -496,7 +589,9 @@ fn upsert_peer(
     if let Ok(mut state) = shared.lock() {
         let entry = state.peers.entry(id.clone()).or_insert_with(|| PeerEntry {
             id: id.clone(),
-            name: String::new(),
+            // Nama sementara agar perangkat yang baru terdeteksi lewat mDNS
+            // tetap bisa dikenali sebelum identify menukar nama aslinya.
+            name: format!("Perangkat {}", pairing::short_code(&id)),
             last_seen: 0,
             connected: false,
             latency_ms: None,
@@ -610,6 +705,23 @@ fn handle_swarm_event(
                         None,
                         None,
                     );
+                    // Hubungkan di level transport agar protokol identify bisa
+                    // menukar nama perangkat. Ini tidak memberi akses data:
+                    // pairing dan persetujuan transfer tetap diperlukan.
+                    let rejected = shared
+                        .lock()
+                        .map(|state| state.rejected_peers.contains(&peer_id.to_string()))
+                        .unwrap_or(false);
+                    if !swarm.is_connected(&peer_id)
+                        && !wire.manually_disconnected.contains(&peer_id)
+                        && !rejected
+                    {
+                        let mut full = addr;
+                        if !full.iter().any(|p| matches!(p, Protocol::P2p(_))) {
+                            full.push(Protocol::P2p(peer_id));
+                        }
+                        let _ = swarm.dial(full);
+                    }
                 }
             }
             mdns::Event::Expired(list) => {
@@ -726,6 +838,8 @@ fn start_outbound_file(
         chunks,
         next_index: 0,
         offer_acked: false,
+        last_activity: Instant::now(),
+        attempts: 0,
     };
     wire.outbound.insert(transfer_id.to_string(), transfer);
     update_transfer_status(db_conn, transfer_id, "active");
@@ -733,9 +847,10 @@ fn start_outbound_file(
 }
 
 fn send_file_offer(swarm: &mut Swarm<DropleBehaviour>, wire: &mut WireState, transfer_id: &str) {
-    let Some(transfer) = wire.outbound.get(transfer_id) else {
+    let Some(transfer) = wire.outbound.get_mut(transfer_id) else {
         return;
     };
+    transfer.last_activity = Instant::now();
     let peer = transfer.peer;
     let request = WireMessage::FileOffer {
         transfer_id: transfer_id.to_string(),
@@ -807,6 +922,7 @@ fn send_next_chunk(
     };
 
     if transfer.next_index >= transfer.chunks.len() {
+        transfer.last_activity = Instant::now();
         let request_id = swarm.behaviour_mut().wire.send_request(
             &transfer.peer,
             WireMessage::FileDone {
@@ -825,6 +941,7 @@ fn send_next_chunk(
 
     let chunk = transfer.chunks[transfer.next_index].clone();
     transfer.next_index += 1;
+    transfer.last_activity = Instant::now();
     let peer = transfer.peer;
     let total = transfer.chunks.len() as u32;
     let progress: i64 = transfer.chunks[..transfer.next_index]
@@ -860,6 +977,312 @@ fn send_pairing_request(swarm: &mut Swarm<DropleBehaviour>, wire: &mut WireState
     wire.pairing_requests.insert(request_id, peer);
 }
 
+fn peer_is_connected(shared: &Arc<Mutex<SharedState>>, peer: &PeerId) -> bool {
+    shared
+        .lock()
+        .map(|state| {
+            state
+                .peers
+                .get(&peer.to_string())
+                .map(|entry| entry.connected)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+fn register_file_offer(
+    peer: &PeerId,
+    transfer_id: String,
+    file_name: String,
+    file_size: i64,
+    file_hash: String,
+    channel: request_response::ResponseChannel<WireMessage>,
+    swarm: &mut Swarm<DropleBehaviour>,
+    shared: &Arc<Mutex<SharedState>>,
+    wire: &mut WireState,
+) {
+    let peer_id = peer.to_string();
+    let blocked = shared
+        .lock()
+        .map(|state| {
+            state.pending_approvals.contains_key(&peer_id)
+                || state.rejected_peers.contains(&peer_id)
+        })
+        .unwrap_or(false);
+    if blocked {
+        let _ = swarm
+            .behaviour_mut()
+            .wire
+            .send_response(channel, WireMessage::nack("koneksi belum diizinkan"));
+        return;
+    }
+    if wire.incoming.contains_key(&transfer_id) {
+        let _ = swarm
+            .behaviour_mut()
+            .wire
+            .send_response(channel, WireMessage::ack("sudah diterima"));
+        return;
+    }
+    // Pengirim mengulang penawaran (mis. karena timeout sesaat). Tetap
+    // tunggu keputusan pengguna, tetapi gunakan channel terbaru.
+    if let Some(existing) = wire.pending_offers.get_mut(&transfer_id) {
+        existing.channel = channel;
+        existing.created = Instant::now();
+        if let Ok(mut state) = shared.lock() {
+            if let Some(offer) = state.pending_file_offers.get_mut(&transfer_id) {
+                offer.created_at = now_millis();
+            }
+        }
+        return;
+    }
+
+    let peer_name = shared
+        .lock()
+        .map(|state| {
+            state
+                .peers
+                .get(&peer_id)
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+
+    wire.pending_offers.insert(
+        transfer_id.clone(),
+        PendingOffer {
+            peer: *peer,
+            file_name: file_name.clone(),
+            file_size,
+            file_hash: file_hash.clone(),
+            channel,
+            created: Instant::now(),
+        },
+    );
+    if let Ok(mut state) = shared.lock() {
+        state.pending_file_offers.insert(
+            transfer_id.clone(),
+            PendingFileOffer {
+                transfer_id,
+                peer_id,
+                peer_name,
+                file_name,
+                file_size,
+                file_hash,
+                created_at: now_millis(),
+            },
+        );
+    }
+}
+
+fn approve_file_offer(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    db_conn: &Option<Connection>,
+    shared: &Arc<Mutex<SharedState>>,
+    transfer_id: &str,
+) {
+    if let Ok(mut state) = shared.lock() {
+        state.pending_file_offers.remove(transfer_id);
+    }
+    let Some(offer) = wire.pending_offers.remove(transfer_id) else {
+        return;
+    };
+    let response = match prepare_incoming(
+        db_conn,
+        &offer.peer,
+        transfer_id,
+        &offer.file_name,
+        offer.file_size,
+        &offer.file_hash,
+    ) {
+        Ok(incoming) => {
+            wire.incoming.insert(transfer_id.to_string(), incoming);
+            WireMessage::ack("offer diterima")
+        }
+        Err(e) => WireMessage::nack(e.to_string()),
+    };
+    let _ = swarm
+        .behaviour_mut()
+        .wire
+        .send_response(offer.channel, response);
+}
+
+fn reject_file_offer(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    shared: &Arc<Mutex<SharedState>>,
+    transfer_id: &str,
+) {
+    if let Ok(mut state) = shared.lock() {
+        state.pending_file_offers.remove(transfer_id);
+    }
+    let Some(offer) = wire.pending_offers.remove(transfer_id) else {
+        return;
+    };
+    let _ = swarm.behaviour_mut().wire.send_response(
+        offer.channel,
+        WireMessage::nack("transfer ditolak oleh penerima"),
+    );
+}
+
+fn fail_outbound_transfer(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    db_conn: &Option<Connection>,
+    transfer_id: &str,
+    status: &str,
+) {
+    let Some(transfer) = wire.outbound.remove(transfer_id) else {
+        return;
+    };
+    wire.pending
+        .retain(|_, action| action.transfer_id != transfer_id);
+    update_transfer_status(db_conn, transfer_id, status);
+    // Beri tahu penerima agar file parsial tidak menggantung.
+    let _ = swarm.behaviour_mut().wire.send_request(
+        &transfer.peer,
+        WireMessage::FileCancel {
+            transfer_id: transfer_id.to_string(),
+        },
+    );
+}
+
+fn fail_peer_transfers(wire: &mut WireState, db_conn: &Option<Connection>, peer: &PeerId) {
+    let outbound_ids: Vec<String> = wire
+        .outbound
+        .iter()
+        .filter(|(_, transfer)| transfer.peer == *peer)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in outbound_ids {
+        wire.outbound.remove(&id);
+        wire.pending.retain(|_, action| action.transfer_id != id);
+        update_transfer_status(db_conn, &id, "failed");
+    }
+
+    let incoming_ids: Vec<String> = wire
+        .incoming
+        .iter()
+        .filter(|(_, transfer)| transfer.peer == *peer)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in incoming_ids {
+        if let Some(incoming) = wire.incoming.remove(&id) {
+            drop(incoming.file);
+            let _ = std::fs::remove_file(&incoming.path);
+            update_transfer_status(db_conn, &id, "failed");
+        }
+    }
+}
+
+/// Membatalkan transfer dari sisi pengguna (lokal).
+fn cancel_transfer(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    db_conn: &Option<Connection>,
+    shared: &Arc<Mutex<SharedState>>,
+    transfer_id: &str,
+) {
+    if let Ok(mut state) = shared.lock() {
+        state.pending_file_offers.remove(transfer_id);
+    }
+    if let Some(offer) = wire.pending_offers.remove(transfer_id) {
+        let _ = swarm
+            .behaviour_mut()
+            .wire
+            .send_response(offer.channel, WireMessage::nack("transfer dibatalkan"));
+    }
+
+    let mut peer: Option<PeerId> = None;
+    if let Some(transfer) = wire.outbound.remove(transfer_id) {
+        peer = Some(transfer.peer);
+        wire.pending
+            .retain(|_, action| action.transfer_id != transfer_id);
+    }
+    if let Some(incoming) = wire.incoming.remove(transfer_id) {
+        peer = Some(incoming.peer);
+        drop(incoming.file);
+        let _ = std::fs::remove_file(&incoming.path);
+    }
+
+    update_transfer_status(db_conn, transfer_id, "cancelled");
+    if let Some(peer) = peer {
+        let _ = swarm.behaviour_mut().wire.send_request(
+            &peer,
+            WireMessage::FileCancel {
+                transfer_id: transfer_id.to_string(),
+            },
+        );
+    }
+}
+
+/// Pengawas transfer: menggagalkan transfer yang koneksinya hilang dan
+/// melanjutkan transfer yang macet saat peer masih terhubung.
+fn file_watchdog(
+    swarm: &mut Swarm<DropleBehaviour>,
+    wire: &mut WireState,
+    db_conn: &Option<Connection>,
+    shared: &Arc<Mutex<SharedState>>,
+) {
+    let now = Instant::now();
+
+    let expired_offers: Vec<String> = wire
+        .pending_offers
+        .iter()
+        .filter(|(_, offer)| now.duration_since(offer.created) >= PENDING_OFFER_TTL)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in expired_offers {
+        if let Ok(mut state) = shared.lock() {
+            state.pending_file_offers.remove(&id);
+        }
+        if let Some(offer) = wire.pending_offers.remove(&id) {
+            let _ = swarm
+                .behaviour_mut()
+                .wire
+                .send_response(offer.channel, WireMessage::nack("waktu persetujuan habis"));
+        }
+    }
+
+    let mut fail_ids: Vec<String> = Vec::new();
+    let mut resume_ids: Vec<String> = Vec::new();
+    for (id, transfer) in &wire.outbound {
+        let connected = peer_is_connected(shared, &transfer.peer);
+        let has_pending = wire
+            .pending
+            .values()
+            .any(|action| action.transfer_id == *id);
+        let idle = now.duration_since(transfer.last_activity);
+        if !connected && idle >= TRANSFER_DISCONNECT_GRACE {
+            fail_ids.push(id.clone());
+        } else if connected && !has_pending && idle >= TRANSFER_IDLE_RESUME {
+            resume_ids.push(id.clone());
+        }
+    }
+    for id in fail_ids {
+        fail_outbound_transfer(swarm, wire, db_conn, &id, "failed");
+    }
+    for id in resume_ids {
+        resume_transfer(swarm, wire, db_conn, &id);
+    }
+
+    let mut incoming_fail: Vec<String> = Vec::new();
+    for (id, transfer) in &wire.incoming {
+        if !peer_is_connected(shared, &transfer.peer)
+            && now.duration_since(transfer.last_activity) >= TRANSFER_DISCONNECT_GRACE
+        {
+            incoming_fail.push(id.clone());
+        }
+    }
+    for id in incoming_fail {
+        if let Some(incoming) = wire.incoming.remove(&id) {
+            drop(incoming.file);
+            let _ = std::fs::remove_file(&incoming.path);
+            update_transfer_status(db_conn, &id, "failed");
+        }
+    }
+}
+
 fn handle_wire_event(
     event: request_response::Event<WireMessage, WireMessage>,
     shared: &Arc<Mutex<SharedState>>,
@@ -879,6 +1302,26 @@ fn handle_wire_event(
                         state.rejected_peers.remove(&id);
                     }
                     wire.pairing_inbound.insert(id, channel);
+                    return;
+                }
+                if let WireMessage::FileOffer {
+                    transfer_id,
+                    file_name,
+                    file_size,
+                    file_hash,
+                } = &request
+                {
+                    register_file_offer(
+                        &peer,
+                        transfer_id.clone(),
+                        file_name.clone(),
+                        *file_size,
+                        file_hash.clone(),
+                        channel,
+                        swarm,
+                        shared,
+                        wire,
+                    );
                     return;
                 }
                 let response = handle_incoming_request(request, &peer, shared, db_conn, wire);
@@ -903,22 +1346,23 @@ fn handle_wire_event(
                 }
             }
             let Some(peer) = wire.outbound.get(&action.transfer_id).map(|t| t.peer) else {
-                mark_transfer_failed(db_conn, &action.transfer_id);
                 return;
             };
-            update_transfer_status(db_conn, &action.transfer_id, "pending");
-            let connected = shared
-                .lock()
-                .map(|s| {
-                    s.peers
-                        .get(&peer.to_string())
-                        .map(|p| p.connected)
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
-            if connected {
-                resume_transfer(swarm, wire, db_conn, &action.transfer_id);
+            if let Some(transfer) = wire.outbound.get_mut(&action.transfer_id) {
+                transfer.attempts += 1;
             }
+            let attempts = wire
+                .outbound
+                .get(&action.transfer_id)
+                .map(|t| t.attempts)
+                .unwrap_or(0);
+            let connected = peer_is_connected(shared, &peer);
+            if !connected || attempts >= MAX_TRANSFER_ATTEMPTS {
+                fail_outbound_transfer(swarm, wire, db_conn, &action.transfer_id, "failed");
+                return;
+            }
+            update_transfer_status(db_conn, &action.transfer_id, "pending");
+            resume_transfer(swarm, wire, db_conn, &action.transfer_id);
         }
         _ => {}
     }
@@ -956,14 +1400,19 @@ fn handle_wire_response(
                     if let Some(transfer) = wire.outbound.get_mut(&action.transfer_id) {
                         transfer.next_index = 0;
                         transfer.offer_acked = false;
+                        transfer.attempts = 0;
+                        transfer.last_activity = Instant::now();
                     }
                     update_transfer_status(db_conn, &action.transfer_id, "pending");
                     send_file_offer(swarm, wire, &action.transfer_id);
                     return;
                 }
-                let _ = wire.outbound.remove(&action.transfer_id);
-                mark_transfer_failed(db_conn, &action.transfer_id);
+                fail_outbound_transfer(swarm, wire, db_conn, &action.transfer_id, "failed");
                 return;
+            }
+            if let Some(transfer) = wire.outbound.get_mut(&action.transfer_id) {
+                transfer.last_activity = Instant::now();
+                transfer.attempts = 0;
             }
             match action.kind {
                 PendingKind::Offer => {
@@ -1009,39 +1458,8 @@ fn handle_incoming_request(
         WireMessage::Sync { .. } => {
             WireMessage::nack("sinkronisasi catatan antar perangkat dinonaktifkan".to_string())
         }
-        WireMessage::FileOffer {
-            transfer_id,
-            file_name,
-            file_size,
-            file_hash,
-        } => {
-            let blocked = shared
-                .lock()
-                .map(|state| {
-                    state.pending_approvals.contains_key(&peer.to_string())
-                        || state.rejected_peers.contains(&peer.to_string())
-                })
-                .unwrap_or(false);
-            if blocked {
-                return WireMessage::nack("koneksi belum diizinkan");
-            }
-            if wire.incoming.contains_key(&transfer_id) {
-                return WireMessage::ack("sudah diterima");
-            }
-            match prepare_incoming(
-                db_conn,
-                peer,
-                &transfer_id,
-                &file_name,
-                file_size,
-                &file_hash,
-            ) {
-                Ok(incoming) => {
-                    wire.incoming.insert(transfer_id, incoming);
-                    WireMessage::ack("offer diterima")
-                }
-                Err(e) => WireMessage::nack(e.to_string()),
-            }
+        WireMessage::FileOffer { .. } => {
+            WireMessage::nack("penawaran file harus diproses oleh handler persetujuan")
         }
         WireMessage::FileChunk {
             transfer_id,
@@ -1075,6 +1493,7 @@ fn handle_incoming_request(
             incoming.hasher.update(&bytes);
             incoming.received.insert(index);
             incoming.written += bytes.len() as i64;
+            incoming.last_activity = Instant::now();
             set_transfer_progress(db_conn, &transfer_id, incoming.written);
             WireMessage::ack("chunk diterima")
         }
@@ -1089,7 +1508,31 @@ fn handle_incoming_request(
                 return WireMessage::nack("hash file tidak cocok");
             }
             update_transfer_status(db_conn, &transfer_id, "completed");
+            set_transfer_progress(db_conn, &transfer_id, incoming.written.max(0));
             WireMessage::ack("transfer selesai")
+        }
+        WireMessage::FileCancel { transfer_id } => {
+            // Penerima meminta pembatalan (atau sebaliknya). Hentikan state
+            // lokal tanpa mengirim balasan cancel lagi.
+            wire.pending_offers.remove(&transfer_id);
+            if let Ok(mut state) = shared.lock() {
+                state.pending_file_offers.remove(&transfer_id);
+            }
+            let outbound = wire.outbound.remove(&transfer_id);
+            if outbound.is_some() {
+                wire.pending
+                    .retain(|_, action| action.transfer_id != transfer_id);
+            }
+            let incoming = wire.incoming.remove(&transfer_id);
+            if let Some(incoming) = incoming {
+                drop(incoming.file);
+                let _ = std::fs::remove_file(&incoming.path);
+                update_transfer_status(db_conn, &transfer_id, "cancelled");
+            }
+            if outbound.is_none() {
+                update_transfer_status(db_conn, &transfer_id, "cancelled");
+            }
+            WireMessage::ack("transfer dibatalkan")
         }
         WireMessage::Ack { .. } => WireMessage::ack("ok"),
     }
@@ -1124,6 +1567,15 @@ fn prepare_incoming(
         .map_err(|e| DropleError::Internal(format!("gagal membuat file tujuan: {e}")))?;
 
     if let Some(conn) = db_conn {
+        let existing = db::get_file_transfer(conn, transfer_id).ok();
+        if let Some(existing) = &existing {
+            // Transfer dengan id yang sama pernah berakhir (mis. pengirim
+            // mengulang setelah koneksi pulih). Baris terminal tidak boleh
+            // dipakai lagi, jadi mulai ulang dari awal.
+            if db::is_terminal_transfer_status(&existing.status) {
+                db::delete_file_transfer(conn, transfer_id)?;
+            }
+        }
         let exists = db::get_file_transfer(conn, transfer_id).is_ok();
         if !exists {
             db::create_file_transfer(
@@ -1141,11 +1593,14 @@ fn prepare_incoming(
     }
 
     Ok(IncomingTransfer {
+        peer: *peer,
         file,
+        path,
         hasher: Sha256::new(),
         expected_hash: file_hash.to_string(),
         written: 0,
         received: std::collections::HashSet::new(),
+        last_activity: Instant::now(),
     })
 }
 
@@ -1312,6 +1767,21 @@ mod tests {
             "transfer-test",
             &source.to_string_lossy(),
         );
+
+        // Transfer harus menunggu persetujuan penerima.
+        let mut approved = false;
+        let started = std::time::Instant::now();
+        while started.elapsed() < Duration::from_secs(10) {
+            let offers = node_b.snapshot().pending_file_offers;
+            if let Some(offer) = offers.get("transfer-test") {
+                assert_eq!(offer.file_name, "hello.txt");
+                node_b.approve_file_offer("transfer-test");
+                approved = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(approved, "penerima harus menerima penawaran file");
 
         let target = recv_dir.join("hello.txt");
         let mut ok = false;

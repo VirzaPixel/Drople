@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="background_channel_name">Transfer Drople</string>
+    <string name="background_channel_description">Menjaga transfer file tetap berjalan di latar belakang</string>
+    <string name="background_notification_title">Drople aktif</string>
+    <string name="background_notification_text">Transfer file tetap berjalan di latar belakang</string>
+</resources>

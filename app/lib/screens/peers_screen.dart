@@ -14,6 +14,7 @@ import '../services/drople_network.dart';
 import '../theme/app_theme.dart';
 import '../widgets/qr_scanner_screen.dart';
 import '../widgets/ui.dart';
+import 'diagnostics_screen.dart';
 import 'my_file_gua_screen.dart';
 
 IconData _peerIconFor(PeerEntry peer) {
@@ -445,6 +446,8 @@ class _PeersScreenState extends State<PeersScreen> {
                   const SizedBox(height: 10),
                   _useCodeCard(theme),
                   const SizedBox(height: 10),
+                  _debugCard(theme),
+                  const SizedBox(height: 10),
                   _RadarCard(
                     peers: _peers,
                     onRefresh: () => _load(silent: false),
@@ -753,6 +756,58 @@ class _PeersScreenState extends State<PeersScreen> {
                         size: 20,
                         color: AppColors.primary,
                       ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _debugCard(ThemeData theme) {
+    return Material(
+      color: AppColors.surfaceContainer.withValues(alpha: 0.6),
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => DiagnosticsScreen(network: widget.network),
+          ),
+        ),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.surfaceContainerHigh),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.bug_report_outlined,
+                size: 19,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.t('diagnostics.entryTitle'),
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      context.l10n.t('diagnostics.entrySubtitle'),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.onSurfaceVariant,
               ),
             ],
           ),
